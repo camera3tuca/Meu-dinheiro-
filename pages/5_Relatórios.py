@@ -6,7 +6,7 @@ import plotly.express as px
 import streamlit as st
 
 import db
-from utils import brl
+from utils import brl, competencia_legivel
 
 st.set_page_config(page_title="Relatórios • Meu Dinheiro", page_icon="📊", layout="wide")
 db.init_db()
@@ -31,12 +31,16 @@ for col in ("receita", "despesa"):
     if col not in mensal.columns:
         mensal[col] = 0.0
 mensal["saldo"] = mensal["receita"] - mensal["despesa"]
+mensal = mensal.sort_values("competencia")
+mensal["mes"] = mensal["competencia"].map(competencia_legivel)
 
 fig = px.line(
-    mensal, x="competencia", y=["receita", "despesa", "saldo"], markers=True,
+    mensal, x="mes", y=["receita", "despesa", "saldo"], markers=True,
     color_discrete_map={"receita": "#2E7D32", "despesa": "#C62828", "saldo": "#1565C0"},
-    labels={"competencia": "Mês", "value": "Valor (R$)", "variable": ""},
+    labels={"mes": "Mês", "value": "Valor (R$)", "variable": ""},
+    category_orders={"mes": mensal["mes"].tolist()},
 )
+fig.update_xaxes(type="category")
 fig.update_layout(margin=dict(t=10, b=10, l=10, r=10))
 st.plotly_chart(fig, use_container_width=True)
 
