@@ -7,7 +7,7 @@ from datetime import date
 import streamlit as st
 
 import db
-from utils import brl
+from utils import brl, somar_meses
 
 st.set_page_config(page_title="Lançamentos • Meu Dinheiro", page_icon="🧾", layout="wide")
 db.init_db()
@@ -41,6 +41,21 @@ with st.expander("➕ Novo lançamento", expanded=True):
         else:
             categoria_nome = col5.selectbox("Categoria", categorias["nome"].tolist())
 
+        col6, col7 = st.columns([1, 1])
+        repeticao = col6.selectbox(
+            "Repetição",
+            ["unico", "parcelado", "recorrente"],
+            format_func=lambda r: {
+                "unico": "Único",
+                "parcelado": "Parcelado (dividir o total)",
+                "recorrente": "Recorrente (repetir mensal)",
+            }[r],
+        )
+        vezes = col7.number_input(
+            "Nº de parcelas / meses", min_value=1, max_value=360, value=1, step=1,
+            help="Usado quando o lançamento é parcelado ou recorrente.",
+        )
+
         pago = st.checkbox("Pago / recebido", value=True)
         enviado = st.form_submit_button("Salvar lançamento", type="primary")
 
@@ -49,6 +64,8 @@ with st.expander("➕ Novo lançamento", expanded=True):
             st.error("Informe uma descrição.")
         elif valor <= 0:
             st.error("O valor deve ser maior que zero.")
+        elif repeticao != "unico" and vezes < 2:
+            st.error("Para parcelar ou repetir, informe pelo menos 2 parcelas/meses.")
         else:
             conta_id = int(contas.loc[contas["nome"] == conta_nome, "id"].iloc[0])
             categoria_id = None
@@ -56,10 +73,30 @@ with st.expander("➕ Novo lançamento", expanded=True):
                 categoria_id = int(
                     categorias.loc[categorias["nome"] == categoria_nome, "id"].iloc[0]
                 )
-            db.criar_lancamento(
-                data_lanc, descricao, valor, tipo, conta_id, categoria_id, pago
-            )
-            st.success(f"Lançamento de {brl(valor)} salvo!")
+
+            if repeticao == "unico":
+                db.criar_lancamento(
+                    data_lanc, descricao, valor, tipo, conta_id, categoria_id, pago
+                )
+                st.success(f"Lançamento de {brl(valor)} salvo!")
+            else:
+                n = int(vezes)
+                # Parcelado divide o total; recorrente repete o mesmo valor.
+                valor_parcela = round(valor / n, 2) if repeticao == "parcelado" else valor
+                itens = []
+                for i in range(n):
+                    itens.append({
+                        "data": somar_meses(data_lanc, i),
+                        "descricao": f"{descricao.strip()} ({i + 1}/{n})",
+                        "valor": valor_parcela,
+                        "tipo": tipo,
+                        "conta_id": conta_id,
+                        "categoria_id": categoria_id,
+                        # Só a 1ª parcela nasce como paga; as futuras ficam pendentes.
+                        "pago": pago and i == 0,
+                    })
+                qtd = db.criar_lancamentos_em_lote(itens)
+                st.success(f"{qtd} lançamentos de {brl(valor_parcela)} criados!")
             st.rerun()
 
 st.divider()

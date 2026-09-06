@@ -90,6 +90,14 @@ def init_db() -> None:
                 valor        REAL NOT NULL,
                 UNIQUE (categoria_id, competencia)
             );
+
+            CREATE TABLE IF NOT EXISTS metas (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome        TEXT NOT NULL,
+                valor_alvo  REAL NOT NULL,
+                valor_atual REAL NOT NULL DEFAULT 0,
+                prazo       TEXT                            -- 'AAAA-MM-DD' (opcional)
+            );
             """
         )
 
@@ -204,6 +212,36 @@ def criar_lancamento(
         )
 
 
+def criar_lancamentos_em_lote(itens: list[dict]) -> int:
+    """Insere vários lançamentos de uma vez (parcelas, recorrências, importação).
+
+    Cada item deve conter: data (date), descricao, valor, tipo, conta_id,
+    categoria_id (ou None) e pago (bool). Retorna a quantidade inserida.
+    """
+    linhas = [
+        (
+            item["data"].isoformat(),
+            item["descricao"].strip(),
+            abs(float(item["valor"])),
+            item["tipo"],
+            int(item["conta_id"]),
+            item.get("categoria_id"),
+            int(item.get("pago", True)),
+        )
+        for item in itens
+    ]
+    with get_conn() as conn:
+        conn.executemany(
+            """
+            INSERT INTO lancamentos
+                (data, descricao, valor, tipo, conta_id, categoria_id, pago)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            linhas,
+        )
+    return len(linhas)
+
+
 def excluir_lancamento(lancamento_id: int) -> None:
     with get_conn() as conn:
         conn.execute("DELETE FROM lancamentos WHERE id = ?", (lancamento_id,))
@@ -284,3 +322,37 @@ def orcamento_vs_realizado(competencia: str) -> pd.DataFrame:
             conn,
             params=(competencia, competencia),
         )
+
+
+# --------------------------------------------------------------------------- #
+# Metas de economia
+# --------------------------------------------------------------------------- #
+def listar_metas() -> pd.DataFrame:
+    with get_conn() as conn:
+        return pd.read_sql_query("SELECT * FROM metas ORDER BY id", conn)
+
+
+def criar_meta(nome: str, valor_alvo: float, valor_atual: float, prazo) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO metas (nome, valor_alvo, valor_atual, prazo) VALUES (?, ?, ?, ?)",
+            (
+                nome.strip(),
+                float(valor_alvo),
+                float(valor_atual),
+                prazo.isoformat() if prazo else None,
+            ),
+        )
+
+
+def atualizar_valor_meta(meta_id: int, novo_valor: float) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE metas SET valor_atual = ? WHERE id = ?",
+            (max(0.0, float(novo_valor)), meta_id),
+        )
+
+
+def excluir_meta(meta_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM metas WHERE id = ?", (meta_id,))
