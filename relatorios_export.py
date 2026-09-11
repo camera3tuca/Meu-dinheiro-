@@ -34,6 +34,52 @@ def build_excel(
     return buffer.getvalue()
 
 
+def _grafico_mensal(resumo: pd.DataFrame) -> io.BytesIO:
+    """Gráfico de barras Receitas x Despesas por mês (PNG em memória)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    meses = resumo["Mês"].str[:3].tolist()
+    x = range(len(meses))
+    fig, ax = plt.subplots(figsize=(8, 3.2), dpi=150)
+    ax.bar([i - 0.2 for i in x], resumo["Receitas"], width=0.4, label="Receitas", color="#2E7D32")
+    ax.bar([i + 0.2 for i in x], resumo["Despesas"], width=0.4, label="Despesas", color="#C62828")
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(meses, fontsize=8)
+    ax.set_ylabel("R$")
+    ax.legend(fontsize=8)
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png")
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+def _grafico_categorias(por_categoria: pd.DataFrame) -> io.BytesIO | None:
+    """Gráfico de barras horizontais das despesas por categoria (PNG em memória)."""
+    if por_categoria.empty:
+        return None
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    dados = por_categoria.sort_values("Total").tail(12)
+    fig, ax = plt.subplots(figsize=(8, max(2.2, 0.4 * len(dados) + 1)), dpi=150)
+    ax.barh(dados["Categoria"], dados["Total"], color="#C62828")
+    ax.set_xlabel("Total (R$)")
+    ax.tick_params(labelsize=8)
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png")
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
 def build_pdf(
     ano: int,
     resumo: pd.DataFrame,
@@ -41,7 +87,7 @@ def build_pdf(
     total_receitas: float,
     total_despesas: float,
 ) -> bytes:
-    """Monta um PDF de resumo anual (texto e tabelas) com o fpdf2."""
+    """Monta um PDF de resumo anual (texto, gráficos e tabelas) com o fpdf2."""
     from fpdf import FPDF
 
     def txt(s: str) -> str:
@@ -66,6 +112,20 @@ def build_pdf(
     pdf.cell(0, 7, txt(f"Despesas: {brl(total_despesas)}"), ln=True)
     pdf.cell(0, 7, txt(f"Saldo: {brl(saldo)}"), ln=True)
     pdf.ln(4)
+
+    # Gráficos
+    largura = pdf.w - 2 * pdf.l_margin
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, txt("Receitas x Despesas por mês"), ln=True)
+    pdf.image(_grafico_mensal(resumo), w=largura)
+    pdf.ln(3)
+
+    graf_cat = _grafico_categorias(por_categoria)
+    if graf_cat is not None:
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 8, txt("Despesas por categoria (gráfico)"), ln=True)
+        pdf.image(graf_cat, w=largura)
+        pdf.ln(3)
 
     # Tabela: resumo mensal
     pdf.set_font("Helvetica", "B", 12)
