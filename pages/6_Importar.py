@@ -53,7 +53,24 @@ if arquivo is not None:
         st.warning("Nenhuma transação reconhecida no arquivo.")
         st.stop()
 
+    # Categorização automática por regras (palavra-chave -> categoria).
+    regras = db.regras_para_matching()
+    id_para_nome = dict(zip(categorias["id"], categorias["nome"]))
+    prev = prev.copy()
+    prev["categoria_id"] = prev["descricao"].map(
+        lambda d: db.sugerir_categoria(d, regras)
+    )
+    prev["categoria"] = prev["categoria_id"].map(
+        lambda cid: id_para_nome.get(cid, "—") if cid is not None else "—"
+    )
+    n_auto = int(prev["categoria_id"].notna().sum())
+
     st.subheader(f"Prévia — {len(prev)} transações encontradas")
+    if regras:
+        st.caption(f"🪄 {n_auto} de {len(prev)} categorizadas automaticamente pelas suas regras.")
+    else:
+        st.caption("Dica: crie regras em **Regras** para categorizar automaticamente.")
+
     rec = prev.loc[prev["tipo"] == "receita", "valor"].sum()
     desp = prev.loc[prev["tipo"] == "despesa", "valor"].sum()
     m1, m2, m3 = st.columns(3)
@@ -61,21 +78,21 @@ if arquivo is not None:
     m2.metric("Despesas", brl(desp))
     m3.metric("Saldo", brl(rec - desp))
 
-    tabela = prev.copy()
+    tabela = prev[["data", "descricao", "valor", "tipo", "categoria"]].copy()
     tabela["data"] = pd.to_datetime(tabela["data"]).dt.strftime("%d/%m/%Y")
     tabela["valor"] = tabela["valor"].map(brl)
     st.dataframe(tabela, hide_index=True, use_container_width=True)
 
     categoria_padrao = st.selectbox(
-        "Aplicar categoria a todos (opcional)", opcoes_cat
+        "Categoria para as não categorizadas (opcional)", opcoes_cat
     )
     marcar_pago = st.checkbox("Marcar todas como pagas/recebidas", value=True)
 
     if st.button(f"Importar {len(prev)} lançamentos", type="primary"):
         conta_id = int(contas.loc[contas["nome"] == conta_nome, "id"].iloc[0])
-        categoria_id = None
+        fallback_id = None
         if categoria_padrao != "(sem categoria)":
-            categoria_id = int(
+            fallback_id = int(
                 categorias.loc[categorias["nome"] == categoria_padrao, "id"].iloc[0]
             )
         itens = [
@@ -85,11 +102,17 @@ if arquivo is not None:
                 "valor": row["valor"],
                 "tipo": row["tipo"],
                 "conta_id": conta_id,
-                "categoria_id": categoria_id,
+                # Regra automática tem prioridade; senão usa o fallback escolhido.
+                "categoria_id": int(row["categoria_id"])
+                if row["categoria_id"] is not None and not pd.isna(row["categoria_id"])
+                else fallback_id,
                 "pago": marcar_pago,
             }
             for _, row in prev.iterrows()
         ]
         qtd = db.criar_lancamentos_em_lote(itens)
-        st.success(f"{qtd} lançamentos importados para a conta '{conta_nome}'!")
+        st.success(
+            f"{qtd} lançamentos importados para '{conta_nome}' "
+            f"({n_auto} categorizados automaticamente)."
+        )
         st.balloons()

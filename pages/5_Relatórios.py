@@ -18,6 +18,12 @@ if lanc.empty:
     st.info("Ainda não há lançamentos para gerar relatórios.")
     st.stop()
 
+# Transferências entre contas não entram nos relatórios de receita/despesa.
+lanc = lanc[lanc["transferencia"] == 0].copy()
+if lanc.empty:
+    st.info("Ainda não há receitas/despesas para gerar relatórios (apenas transferências).")
+    st.stop()
+
 lanc["competencia"] = lanc["data"].dt.strftime("%Y-%m")
 
 # ----------------------------------------------------------------------------- #

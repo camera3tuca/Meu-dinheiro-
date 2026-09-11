@@ -86,6 +86,21 @@ def _mes_expr(coluna: str) -> str:
     return f"to_char(CAST({coluna} AS DATE), 'YYYY-MM')"
 
 
+def _coluna_existe(conn, tabela: str, coluna: str) -> bool:
+    """Verifica se uma coluna existe na tabela (dialeto-aware)."""
+    if _is_sqlite():
+        rows = conn.execute(text(f"PRAGMA table_info({tabela})")).fetchall()
+        return any(r[1] == coluna for r in rows)
+    row = conn.execute(
+        text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = :t AND column_name = :c"
+        ),
+        {"t": tabela, "c": coluna},
+    ).fetchone()
+    return row is not None
+
+
 def _read(sql: str, params: dict | None = None) -> pd.DataFrame:
     with get_engine().connect() as conn:
         return pd.read_sql_query(text(sql), conn, params=params or {})
@@ -129,14 +144,15 @@ def init_db() -> None:
         """,
         f"""
         CREATE TABLE IF NOT EXISTS lancamentos (
-            id           {id_col},
-            data         TEXT NOT NULL,
-            descricao    TEXT NOT NULL,
-            valor        {real} NOT NULL,
-            tipo         TEXT NOT NULL CHECK (tipo IN ('receita', 'despesa')),
-            conta_id     INTEGER NOT NULL REFERENCES contas(id) ON DELETE CASCADE,
-            categoria_id INTEGER REFERENCES categorias(id) ON DELETE SET NULL,
-            pago         INTEGER NOT NULL DEFAULT 1
+            id            {id_col},
+            data          TEXT NOT NULL,
+            descricao     TEXT NOT NULL,
+            valor         {real} NOT NULL,
+            tipo          TEXT NOT NULL CHECK (tipo IN ('receita', 'despesa')),
+            conta_id      INTEGER NOT NULL REFERENCES contas(id) ON DELETE CASCADE,
+            categoria_id  INTEGER REFERENCES categorias(id) ON DELETE SET NULL,
+            pago          INTEGER NOT NULL DEFAULT 1,
+            transferencia INTEGER NOT NULL DEFAULT 0
         )
         """,
         f"""
@@ -157,11 +173,28 @@ def init_db() -> None:
             prazo       TEXT
         )
         """,
+        f"""
+        CREATE TABLE IF NOT EXISTS regras_categoria (
+            id            {id_col},
+            palavra_chave TEXT NOT NULL,
+            categoria_id  INTEGER NOT NULL REFERENCES categorias(id) ON DELETE CASCADE
+        )
+        """,
     ]
 
     with get_engine().begin() as conn:
         for stmt in ddl:
             conn.execute(text(stmt))
+
+        # Migração: garante a coluna 'transferencia' em bancos criados antes dela.
+        if not _coluna_existe(conn, "lancamentos", "transferencia"):
+            conn.execute(
+                text(
+                    "ALTER TABLE lancamentos "
+                    "ADD COLUMN transferencia INTEGER NOT NULL DEFAULT 0"
+                )
+            )
+
         n_cat = conn.execute(text("SELECT COUNT(*) FROM categorias")).scalar()
         if n_cat == 0:
             conn.execute(
@@ -319,7 +352,7 @@ def listar_lancamentos(
 
     df = _read(
         f"""
-        SELECT l.id, l.data, l.descricao, l.valor, l.tipo, l.pago,
+        SELECT l.id, l.data, l.descricao, l.valor, l.tipo, l.pago, l.transferencia,
                c.nome AS conta, cat.nome AS categoria, cat.cor AS cor
         FROM lancamentos l
         JOIN contas c ON c.id = l.conta_id
@@ -359,6 +392,7 @@ def orcamento_vs_realizado(competencia: str) -> pd.DataFrame:
                    SELECT SUM(l.valor) FROM lancamentos l
                    WHERE l.categoria_id = cat.id
                      AND l.tipo = 'despesa' AND l.pago = 1
+                     AND l.transferencia = 0
                      AND {_mes_expr('l.data')} = :competencia
                ), 0) AS gasto
         FROM categorias cat
@@ -402,3 +436,113 @@ def atualizar_valor_meta(meta_id: int, novo_valor: float) -> None:
 
 def excluir_meta(meta_id: int) -> None:
     _exec("DELETE FROM metas WHERE id = :id", {"id": meta_id})
+
+
+# --------------------------------------------------------------------------- #
+# Transferências entre contas
+# --------------------------------------------------------------------------- #
+def criar_transferencia(
+    data_transf: date,
+    valor: float,
+    conta_origem_id: int,
+    conta_destino_id: int,
+    descricao: str = "",
+) -> None:
+    """Registra uma transferência como dois lançamentos marcados (transferencia=1).
+
+    Sai como despesa na conta de origem e entra como receita na de destino.
+    Transferências afetam o saldo das contas, mas NÃO contam como receita/despesa
+    nos relatórios e no orçamento.
+    """
+    if conta_origem_id == conta_destino_id:
+        raise ValueError("A conta de origem e destino devem ser diferentes.")
+    valor = abs(float(valor))
+    with get_engine().begin() as conn:
+        nomes = dict(
+            conn.execute(text("SELECT id, nome FROM contas")).fetchall()
+        )
+        origem = nomes.get(conta_origem_id, "?")
+        destino = nomes.get(conta_destino_id, "?")
+        sufixo = f" — {descricao.strip()}" if descricao.strip() else ""
+        linhas = [
+            {
+                "data": data_transf.isoformat(),
+                "descricao": f"Transferência para {destino}{sufixo}",
+                "valor": valor, "tipo": "despesa",
+                "conta_id": conta_origem_id, "categoria_id": None,
+                "pago": 1, "transferencia": 1,
+            },
+            {
+                "data": data_transf.isoformat(),
+                "descricao": f"Transferência de {origem}{sufixo}",
+                "valor": valor, "tipo": "receita",
+                "conta_id": conta_destino_id, "categoria_id": None,
+                "pago": 1, "transferencia": 1,
+            },
+        ]
+        conn.execute(
+            text(
+                """
+                INSERT INTO lancamentos
+                    (data, descricao, valor, tipo, conta_id, categoria_id, pago, transferencia)
+                VALUES
+                    (:data, :descricao, :valor, :tipo, :conta_id, :categoria_id, :pago, :transferencia)
+                """
+            ),
+            linhas,
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Regras de categorização automática (por palavra-chave)
+# --------------------------------------------------------------------------- #
+def listar_regras() -> pd.DataFrame:
+    return _read(
+        """
+        SELECT r.id, r.palavra_chave, r.categoria_id,
+               cat.nome AS categoria, cat.tipo AS tipo, cat.cor AS cor
+        FROM regras_categoria r
+        JOIN categorias cat ON cat.id = r.categoria_id
+        ORDER BY r.palavra_chave
+        """
+    )
+
+
+def criar_regra(palavra_chave: str, categoria_id: int) -> None:
+    _exec(
+        "INSERT INTO regras_categoria (palavra_chave, categoria_id) "
+        "VALUES (:palavra, :cat)",
+        {"palavra": palavra_chave.strip(), "cat": categoria_id},
+    )
+
+
+def excluir_regra(regra_id: int) -> None:
+    _exec("DELETE FROM regras_categoria WHERE id = :id", {"id": regra_id})
+
+
+def regras_para_matching() -> list[tuple[str, int]]:
+    """Retorna [(palavra_lower, categoria_id)] ordenadas por comprimento (desc).
+
+    A ordenação por comprimento faz a palavra mais específica vencer
+    (ex.: 'supermercado' antes de 'super').
+    """
+    df = listar_regras()
+    if df.empty:
+        return []
+    regras = [
+        (str(p).lower().strip(), int(c))
+        for p, c in zip(df["palavra_chave"], df["categoria_id"])
+        if str(p).strip()
+    ]
+    return sorted(regras, key=lambda x: len(x[0]), reverse=True)
+
+
+def sugerir_categoria(descricao: str, regras: list[tuple[str, int]] | None = None) -> int | None:
+    """Retorna o categoria_id da primeira regra cuja palavra aparece na descrição."""
+    if regras is None:
+        regras = regras_para_matching()
+    texto = (descricao or "").lower()
+    for palavra, categoria_id in regras:
+        if palavra and palavra in texto:
+            return categoria_id
+    return None

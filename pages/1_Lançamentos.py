@@ -122,15 +122,20 @@ lanc = db.listar_lancamentos(
 if lanc.empty:
     st.info("Nenhum lançamento no período selecionado.")
 else:
-    total_rec = lanc.loc[lanc["tipo"] == "receita", "valor"].sum()
-    total_desp = lanc.loc[lanc["tipo"] == "despesa", "valor"].sum()
+    # Transferências não entram no resumo de receitas/despesas.
+    mov = lanc[lanc["transferencia"] == 0]
+    total_rec = mov.loc[mov["tipo"] == "receita", "valor"].sum()
+    total_desp = mov.loc[mov["tipo"] == "despesa", "valor"].sum()
     m1, m2, m3 = st.columns(3)
     m1.metric("Receitas", brl(total_rec))
     m2.metric("Despesas", brl(total_desp))
     m3.metric("Saldo", brl(total_rec - total_desp))
 
     for _, row in lanc.iterrows():
-        sinal = "🟢" if row["tipo"] == "receita" else "🔴"
+        if row["transferencia"] == 1:
+            sinal = "🔁"
+        else:
+            sinal = "🟢" if row["tipo"] == "receita" else "🔴"
         cols = st.columns([1, 3, 2, 2, 2, 1])
         cols[0].write(row["data"].strftime("%d/%m/%Y"))
         cols[1].write(f"{sinal} {row['descricao']}")

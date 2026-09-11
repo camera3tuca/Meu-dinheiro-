@@ -46,9 +46,11 @@ fim = date(ano + (mes == 12), (mes % 12) + 1, 1) - pd.Timedelta(days=1)
 fim = fim.date() if hasattr(fim, "date") else fim
 
 lanc = db.listar_lancamentos(inicio=inicio, fim=fim)
+# Transferências entre contas não contam como receita/despesa nos indicadores.
+mov = lanc[lanc["transferencia"] == 0] if not lanc.empty else lanc
 
-receitas = lanc.loc[lanc["tipo"] == "receita", "valor"].sum() if not lanc.empty else 0.0
-despesas = lanc.loc[lanc["tipo"] == "despesa", "valor"].sum() if not lanc.empty else 0.0
+receitas = mov.loc[mov["tipo"] == "receita", "valor"].sum() if not mov.empty else 0.0
+despesas = mov.loc[mov["tipo"] == "despesa", "valor"].sum() if not mov.empty else 0.0
 saldo_mes = receitas - despesas
 
 # ----------------------------------------------------------------------------- #
@@ -72,7 +74,7 @@ col_esq, col_dir = st.columns(2)
 
 with col_esq:
     st.subheader("Despesas por categoria")
-    desp = lanc[lanc["tipo"] == "despesa"]
+    desp = mov[mov["tipo"] == "despesa"]
     if desp.empty:
         st.info("Sem despesas registradas neste mês.")
     else:
@@ -97,11 +99,11 @@ with col_esq:
 
 with col_dir:
     st.subheader("Receitas x Despesas por dia")
-    if lanc.empty:
+    if mov.empty:
         st.info("Sem lançamentos neste mês.")
     else:
         por_dia = (
-            lanc.assign(dia=lanc["data"].dt.day)
+            mov.assign(dia=mov["data"].dt.day)
             .groupby(["dia", "tipo"])["valor"]
             .sum()
             .reset_index()

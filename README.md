@@ -19,7 +19,11 @@ Esta é a primeira versão (MVP) usada para desenvolver e validar o sistema.
 - **Orçamento:** limites mensais por categoria e acompanhamento do realizado (barras de
   progresso e alertas de estouro).
 - **Importar extrato:** importação de extratos bancários em **CSV** ou **OFX/QFX**, com
-  prévia das transações antes de confirmar.
+  prévia das transações e **categorização automática** aplicada na importação.
+- **Categorização automática (Regras):** regras do tipo *palavra-chave → categoria*
+  (ex.: `uber` → Transporte) aplicadas automaticamente ao importar extratos.
+- **Transferências entre contas:** move dinheiro entre contas (afeta os saldos, mas
+  não conta como receita/despesa nos relatórios e no orçamento).
 - **Metas de economia:** objetivos de poupança (viagem, reserva, etc.) com barra de
   progresso, prazo opcional e atualização do valor guardado.
 - **Relatórios:** evolução mensal, maiores despesas por categoria e exportação em CSV.
@@ -110,7 +114,9 @@ e o tema visual vem de `.streamlit/config.toml`.
     ├── 4_Orçamento.py
     ├── 5_Relatórios.py
     ├── 6_Importar.py
-    └── 7_Metas.py
+    ├── 7_Metas.py
+    ├── 8_Transferências.py
+    └── 9_Regras.py
 ```
 
 ## 🧱 Stack
@@ -123,6 +129,6 @@ e o tema visual vem de `.streamlit/config.toml`.
 
 ## 🛣️ Próximos passos (ideias)
 
-- Categorização automática de lançamentos importados (por palavra-chave)
-- Transferências entre contas
 - Múltiplos usuários / autenticação
+- Edição de lançamentos existentes (hoje é criar/excluir)
+- Relatório anual e exportação em Excel/PDF
