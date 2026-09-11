@@ -42,6 +42,31 @@ streamlit run app.py
 O aplicativo abre em `http://localhost:8501`. O banco de dados é criado em
 `data/meu_dinheiro.db` (ignorado pelo Git).
 
+## ☁️ Deploy no Streamlit Community Cloud
+
+O app já está pronto para publicação gratuita no
+[Streamlit Community Cloud](https://share.streamlit.io):
+
+1. Acesse **https://share.streamlit.io** e entre com sua conta do GitHub.
+2. Clique em **Create app → Deploy a public app from GitHub**.
+3. Preencha:
+   - **Repository:** `camera3tuca/Meu-dinheiro-`
+   - **Branch:** `main`
+   - **Main file path:** `app.py`
+4. (Opcional) Em **Advanced settings**, escolha a versão do Python (3.11+).
+5. Clique em **Deploy**. Em ~2 minutos o app estará no ar em uma URL pública
+   `https://<seu-app>.streamlit.app` — que você pode abrir no celular.
+
+As dependências são instaladas automaticamente a partir de `requirements.txt`,
+e o tema visual vem de `.streamlit/config.toml`.
+
+> ⚠️ **Sobre os dados:** no plano gratuito o armazenamento é **efêmero** — o
+> banco SQLite (`data/meu_dinheiro.db`) é recriado quando o app reinicia ou
+> recebe um novo deploy, então os lançamentos cadastrados online podem se
+> perder. Isso é adequado para testes/demonstração. Para uso real com dados
+> permanentes, o próximo passo é migrar o armazenamento para um banco externo
+> (ex.: PostgreSQL/Supabase) — veja "Próximos passos".
+
 ## 🗂️ Estrutura
 
 ```
@@ -51,6 +76,7 @@ O aplicativo abre em `http://localhost:8501`. O banco de dados é criado em
 ├── utils.py                  # Formatação (R$, meses) e datas
 ├── importador.py             # Leitura de extratos CSV e OFX
 ├── requirements.txt
+├── .streamlit/config.toml    # Tema e configuração do Streamlit
 └── pages/
     ├── 1_Lançamentos.py
     ├── 2_Contas.py
@@ -70,7 +96,7 @@ O aplicativo abre em `http://localhost:8501`. O banco de dados é criado em
 
 ## 🛣️ Próximos passos (ideias)
 
+- **Persistência em banco externo** (PostgreSQL/Supabase) para dados permanentes no deploy
 - Categorização automática de lançamentos importados (por palavra-chave)
 - Transferências entre contas
 - Múltiplos usuários / autenticação
-- Migração para banco em servidor (PostgreSQL) e deploy
