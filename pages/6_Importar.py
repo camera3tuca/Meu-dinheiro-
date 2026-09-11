@@ -7,10 +7,13 @@ import streamlit as st
 
 import db
 import importador
+from auth import botao_sair, require_login
 from utils import brl
 
 st.set_page_config(page_title="Importar • Meu Dinheiro", page_icon="📥", layout="wide")
+require_login()
 db.init_db()
+botao_sair()
 
 st.title("📥 Importar extrato")
 st.caption("Envie um arquivo **CSV** ou **OFX** do seu banco para lançar as transações em lote.")

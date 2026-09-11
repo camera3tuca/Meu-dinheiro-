@@ -8,10 +8,13 @@ import pandas as pd
 import streamlit as st
 
 import db
+from auth import botao_sair, require_login
 from utils import brl
 
 st.set_page_config(page_title="Metas • Meu Dinheiro", page_icon="🐖", layout="wide")
+require_login()
 db.init_db()
+botao_sair()
 
 st.title("🐖 Metas de economia")
 st.caption("Defina objetivos (viagem, reserva de emergência, etc.) e acompanhe quanto já juntou.")

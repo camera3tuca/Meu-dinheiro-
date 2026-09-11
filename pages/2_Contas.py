@@ -5,10 +5,13 @@ from __future__ import annotations
 import streamlit as st
 
 import db
+from auth import botao_sair, require_login
 from utils import brl
 
 st.set_page_config(page_title="Contas • Meu Dinheiro", page_icon="🏦", layout="wide")
+require_login()
 db.init_db()
+botao_sair()
 
 st.title("🏦 Contas")
 

@@ -328,6 +328,36 @@ def criar_lancamentos_em_lote(itens: list[dict]) -> int:
     return len(linhas)
 
 
+def atualizar_lancamento(
+    lancamento_id: int,
+    data_lanc: date,
+    descricao: str,
+    valor: float,
+    tipo: str,
+    conta_id: int,
+    categoria_id: int | None,
+    pago: bool,
+) -> None:
+    _exec(
+        """
+        UPDATE lancamentos
+        SET data = :data, descricao = :descricao, valor = :valor, tipo = :tipo,
+            conta_id = :conta_id, categoria_id = :categoria_id, pago = :pago
+        WHERE id = :id
+        """,
+        {
+            "id": lancamento_id,
+            "data": data_lanc.isoformat(),
+            "descricao": descricao.strip(),
+            "valor": abs(valor),
+            "tipo": tipo,
+            "conta_id": conta_id,
+            "categoria_id": categoria_id,
+            "pago": int(pago),
+        },
+    )
+
+
 def excluir_lancamento(lancamento_id: int) -> None:
     _exec("DELETE FROM lancamentos WHERE id = :id", {"id": lancamento_id})
 
@@ -353,6 +383,7 @@ def listar_lancamentos(
     df = _read(
         f"""
         SELECT l.id, l.data, l.descricao, l.valor, l.tipo, l.pago, l.transferencia,
+               l.categoria_id, l.conta_id,
                c.nome AS conta, cat.nome AS categoria, cat.cor AS cor
         FROM lancamentos l
         JOIN contas c ON c.id = l.conta_id

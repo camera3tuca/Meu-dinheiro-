@@ -8,10 +8,13 @@ import plotly.express as px
 import streamlit as st
 
 import db
+from auth import botao_sair, require_login
 from utils import brl, competencia_legivel
 
 st.set_page_config(page_title="Orçamento • Meu Dinheiro", page_icon="🎯", layout="wide")
+require_login()
 db.init_db()
+botao_sair()
 
 st.title("🎯 Orçamento mensal")
 
