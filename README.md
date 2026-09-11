@@ -39,8 +39,29 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-O aplicativo abre em `http://localhost:8501`. O banco de dados é criado em
-`data/meu_dinheiro.db` (ignorado pelo Git).
+O aplicativo abre em `http://localhost:8501`.
+
+### 🗄️ Banco de dados
+
+O app funciona com **PostgreSQL** (produção) ou **SQLite** (local), escolhido
+automaticamente pela string de conexão, resolvida nesta ordem:
+
+1. `st.secrets["DATABASE_URL"]` — arquivo `.streamlit/secrets.toml` ou os *Secrets*
+   do Streamlit Cloud;
+2. variável de ambiente `DATABASE_URL`;
+3. **fallback:** SQLite local em `data/meu_dinheiro.db` (nenhuma configuração
+   necessária para começar).
+
+Para usar PostgreSQL (ex.: [Neon](https://neon.tech)), copie o exemplo e preencha
+com a sua string de conexão:
+
+```bash
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+# edite o arquivo e cole a DATABASE_URL do seu banco
+```
+
+> 🔒 O arquivo `.streamlit/secrets.toml` está no `.gitignore` — a senha do banco
+> **nunca** é enviada ao repositório.
 
 ## ☁️ Deploy no Streamlit Community Cloud
 
@@ -53,19 +74,22 @@ O app já está pronto para publicação gratuita no
    - **Repository:** `camera3tuca/Meu-dinheiro-`
    - **Branch:** `main`
    - **Main file path:** `app.py`
-4. (Opcional) Em **Advanced settings**, escolha a versão do Python (3.11+).
+4. Em **Advanced settings → Secrets**, cole a sua string de conexão do PostgreSQL:
+   ```toml
+   DATABASE_URL = "postgresql://USUARIO:SENHA@HOST/BANCO?sslmode=require"
+   ```
+   (Opcional) escolha a versão do Python (3.11+).
 5. Clique em **Deploy**. Em ~2 minutos o app estará no ar em uma URL pública
    `https://<seu-app>.streamlit.app` — que você pode abrir no celular.
 
 As dependências são instaladas automaticamente a partir de `requirements.txt`,
 e o tema visual vem de `.streamlit/config.toml`.
 
-> ⚠️ **Sobre os dados:** no plano gratuito o armazenamento é **efêmero** — o
-> banco SQLite (`data/meu_dinheiro.db`) é recriado quando o app reinicia ou
-> recebe um novo deploy, então os lançamentos cadastrados online podem se
-> perder. Isso é adequado para testes/demonstração. Para uso real com dados
-> permanentes, o próximo passo é migrar o armazenamento para um banco externo
-> (ex.: PostgreSQL/Supabase) — veja "Próximos passos".
+> ✅ **Dados permanentes:** com a `DATABASE_URL` apontando para um PostgreSQL
+> (ex.: Neon), os lançamentos ficam salvos no banco e **sobrevivem** a reinícios
+> e novos deploys. Sem `DATABASE_URL`, o app cai no SQLite local, que no plano
+> gratuito do Streamlit é **efêmero** (recriado a cada reinício) — bom apenas
+> para testes.
 
 ## 🗂️ Estrutura
 
@@ -76,7 +100,9 @@ e o tema visual vem de `.streamlit/config.toml`.
 ├── utils.py                  # Formatação (R$, meses) e datas
 ├── importador.py             # Leitura de extratos CSV e OFX
 ├── requirements.txt
-├── .streamlit/config.toml    # Tema e configuração do Streamlit
+├── .streamlit/
+│   ├── config.toml           # Tema e configuração do Streamlit
+│   └── secrets.toml.example  # Modelo da DATABASE_URL (copie p/ secrets.toml)
 └── pages/
     ├── 1_Lançamentos.py
     ├── 2_Contas.py
@@ -92,11 +118,11 @@ e o tema visual vem de `.streamlit/config.toml`.
 - [Streamlit](https://streamlit.io/) — interface web
 - [pandas](https://pandas.pydata.org/) — manipulação de dados
 - [Plotly](https://plotly.com/python/) — gráficos interativos
-- SQLite — armazenamento local
+- [SQLAlchemy](https://www.sqlalchemy.org/) — acesso ao banco (PostgreSQL ou SQLite)
+- PostgreSQL (produção, ex.: [Neon](https://neon.tech)) / SQLite (local)
 
 ## 🛣️ Próximos passos (ideias)
 
-- **Persistência em banco externo** (PostgreSQL/Supabase) para dados permanentes no deploy
 - Categorização automática de lançamentos importados (por palavra-chave)
 - Transferências entre contas
 - Múltiplos usuários / autenticação
