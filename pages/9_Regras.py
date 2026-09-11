@@ -9,12 +9,11 @@ from __future__ import annotations
 import streamlit as st
 
 import db
-from auth import botao_sair, require_login
+from auth import require_login
 
 st.set_page_config(page_title="Regras • Meu Dinheiro", page_icon="🪄", layout="wide")
-require_login()
 db.init_db()
-botao_sair()
+user_id = require_login()
 
 st.title("🪄 Categorização automática")
 st.caption(
@@ -23,7 +22,7 @@ st.caption(
     "automaticamente. A palavra mais específica (mais longa) tem prioridade."
 )
 
-categorias = db.listar_categorias()
+categorias = db.listar_categorias(user_id)
 if categorias.empty:
     st.warning("Cadastre categorias primeiro na página **Categorias**.")
     st.stop()
@@ -42,14 +41,14 @@ with st.form("form_regra", clear_on_submit=True):
         if not palavra.strip():
             st.error("Informe a palavra-chave.")
         else:
-            db.criar_regra(palavra, rotulos[escolha])
+            db.criar_regra(user_id, palavra, rotulos[escolha])
             st.success(f"Regra criada: '{palavra.strip().lower()}' → {escolha}")
             st.rerun()
 
 st.divider()
 
 st.subheader("Regras cadastradas")
-regras = db.listar_regras()
+regras = db.listar_regras(user_id)
 if regras.empty:
     st.info("Nenhuma regra ainda. Crie a primeira acima para agilizar as importações.")
 else:
@@ -62,7 +61,7 @@ else:
             unsafe_allow_html=True,
         )
         if c[2].button("🗑️", key=f"delr_{row['id']}"):
-            db.excluir_regra(int(row["id"]))
+            db.excluir_regra(user_id, int(row["id"]))
             st.rerun()
 
     # Teste rápido de uma descrição
@@ -70,7 +69,7 @@ else:
     st.subheader("Testar uma descrição")
     teste = st.text_input("Digite uma descrição para ver qual categoria seria aplicada")
     if teste.strip():
-        cat_id = db.sugerir_categoria(teste)
+        cat_id = db.sugerir_categoria(teste, db.regras_para_matching(user_id))
         if cat_id is None:
             st.warning("Nenhuma regra corresponde a essa descrição.")
         else:

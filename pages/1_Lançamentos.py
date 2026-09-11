@@ -8,17 +8,16 @@ import pandas as pd
 import streamlit as st
 
 import db
-from auth import botao_sair, require_login
+from auth import require_login
 from utils import brl, somar_meses
 
 st.set_page_config(page_title="Lançamentos • Meu Dinheiro", page_icon="🧾", layout="wide")
-require_login()
 db.init_db()
-botao_sair()
+user_id = require_login()
 
 st.title("🧾 Lançamentos")
 
-contas = db.listar_contas()
+contas = db.listar_contas(user_id)
 if contas.empty:
     st.warning("Cadastre uma conta primeiro na página **Contas**.")
     st.stop()
@@ -30,7 +29,7 @@ with st.expander("➕ Novo lançamento", expanded=True):
     tipo = st.radio("Tipo", ["despesa", "receita"], horizontal=True,
                     format_func=lambda t: "Despesa" if t == "despesa" else "Receita")
 
-    categorias = db.listar_categorias(tipo=tipo)
+    categorias = db.listar_categorias(user_id, tipo=tipo)
     with st.form("form_lancamento", clear_on_submit=True):
         col1, col2, col3 = st.columns(3)
         data_lanc = col1.date_input("Data", value=date.today(), format="DD/MM/YYYY")
@@ -79,7 +78,7 @@ with st.expander("➕ Novo lançamento", expanded=True):
                 )
 
             if repeticao == "unico":
-                db.criar_lancamento(
+                db.criar_lancamento(user_id, 
                     data_lanc, descricao, valor, tipo, conta_id, categoria_id, pago
                 )
                 st.success(f"Lançamento de {brl(valor)} salvo!")
@@ -99,7 +98,7 @@ with st.expander("➕ Novo lançamento", expanded=True):
                         # Só a 1ª parcela nasce como paga; as futuras ficam pendentes.
                         "pago": pago and i == 0,
                     })
-                qtd = db.criar_lancamentos_em_lote(itens)
+                qtd = db.criar_lancamentos_em_lote(user_id, itens)
                 st.success(f"{qtd} lançamentos de {brl(valor_parcela)} criados!")
             st.rerun()
 
@@ -117,7 +116,7 @@ filtro_tipo = f3.selectbox(
     format_func=lambda t: {"Todos": "Todos", "receita": "Receitas", "despesa": "Despesas"}[t],
 )
 
-lanc = db.listar_lancamentos(
+lanc = db.listar_lancamentos(user_id, 
     inicio=inicio,
     fim=fim,
     tipo=None if filtro_tipo == "Todos" else filtro_tipo,
@@ -141,7 +140,7 @@ else:
     edit_id = st.session_state.get("edit_id")
     if edit_id is not None and edit_id in set(lanc["id"].tolist()):
         reg = lanc[lanc["id"] == edit_id].iloc[0]
-        todas_cat = db.listar_categorias()
+        todas_cat = db.listar_categorias(user_id)
         cat_opcoes = ["(sem categoria)"] + [
             f"{r['nome']} ({r['tipo']})" for _, r in todas_cat.iterrows()
         ]
@@ -194,7 +193,7 @@ else:
                 else:
                     conta_id = int(contas.loc[contas["nome"] == e_conta, "id"].iloc[0])
                     categoria_id = cat_ids[cat_opcoes.index(e_cat)]
-                    db.atualizar_lancamento(
+                    db.atualizar_lancamento(user_id, 
                         int(edit_id), e_data, e_desc, e_valor, e_tipo,
                         conta_id, categoria_id, e_pago,
                     )
@@ -216,7 +215,7 @@ else:
             st.session_state["edit_id"] = int(row["id"])
             st.rerun()
         if cols[6].button("🗑️", key=f"del_{row['id']}", help="Excluir"):
-            db.excluir_lancamento(int(row["id"]))
+            db.excluir_lancamento(user_id, int(row["id"]))
             if st.session_state.get("edit_id") == int(row["id"]):
                 st.session_state["edit_id"] = None
             st.rerun()

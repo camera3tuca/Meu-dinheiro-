@@ -7,25 +7,24 @@ import streamlit as st
 
 import db
 import importador
-from auth import botao_sair, require_login
+from auth import require_login
 from utils import brl
 
 st.set_page_config(page_title="Importar • Meu Dinheiro", page_icon="📥", layout="wide")
-require_login()
 db.init_db()
-botao_sair()
+user_id = require_login()
 
 st.title("📥 Importar extrato")
 st.caption("Envie um arquivo **CSV** ou **OFX** do seu banco para lançar as transações em lote.")
 
-contas = db.listar_contas()
+contas = db.listar_contas(user_id)
 if contas.empty:
     st.warning("Cadastre uma conta primeiro na página **Contas**.")
     st.stop()
 
 col1, col2 = st.columns(2)
 conta_nome = col1.selectbox("Conta de destino", contas["nome"].tolist())
-categorias = db.listar_categorias()
+categorias = db.listar_categorias(user_id)
 opcoes_cat = ["(sem categoria)"] + categorias["nome"].tolist()
 
 arquivo = st.file_uploader("Arquivo do extrato", type=["csv", "ofx", "qfx", "txt"])
@@ -57,7 +56,7 @@ if arquivo is not None:
         st.stop()
 
     # Categorização automática por regras (palavra-chave -> categoria).
-    regras = db.regras_para_matching()
+    regras = db.regras_para_matching(user_id)
     id_para_nome = dict(zip(categorias["id"], categorias["nome"]))
     prev = prev.copy()
     prev["categoria_id"] = prev["descricao"].map(
@@ -113,7 +112,7 @@ if arquivo is not None:
             }
             for _, row in prev.iterrows()
         ]
-        qtd = db.criar_lancamentos_em_lote(itens)
+        qtd = db.criar_lancamentos_em_lote(user_id, itens)
         st.success(
             f"{qtd} lançamentos importados para '{conta_nome}' "
             f"({n_auto} categorizados automaticamente)."

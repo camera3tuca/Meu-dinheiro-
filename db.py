@@ -1,20 +1,22 @@
-"""Camada de acesso a dados do Meu Dinheiro.
+"""Camada de acesso a dados do Meu Dinheiro (multiusuário).
 
-Usa SQLAlchemy para funcionar tanto com **PostgreSQL** (produção, ex.: Neon)
-quanto com **SQLite** (desenvolvimento local, sem configuração).
+Usa SQLAlchemy para funcionar com PostgreSQL (produção, ex.: Neon) ou SQLite
+(desenvolvimento local). Cada usuário tem seus próprios dados: todas as tabelas
+de domínio têm `user_id` e todas as consultas filtram por ele.
 
-A URL de conexão é resolvida nesta ordem:
-    1. st.secrets["DATABASE_URL"]        (Streamlit Cloud / secrets.toml)
+A URL de conexão é resolvida por:
+    1. st.secrets["DATABASE_URL"]
     2. variável de ambiente DATABASE_URL
-    3. SQLite local em data/meu_dinheiro.db  (fallback)
-
-A senha do banco NUNCA fica no código — apenas em secrets/variáveis de ambiente.
+    3. SQLite local em data/meu_dinheiro.db (fallback)
 """
 
 from __future__ import annotations
 
+import binascii
+import hashlib
+import hmac
 import os
-from datetime import date
+from datetime import date, datetime
 from functools import lru_cache
 
 import pandas as pd
@@ -24,6 +26,7 @@ from sqlalchemy.engine import Engine
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DB_PATH = os.path.join(DATA_DIR, "meu_dinheiro.db")
 
+# Categorias e contas criadas para cada NOVO usuário.
 CATEGORIAS_PADRAO = [
     ("Salário", "receita", "#2E7D32"),
     ("Rendimentos", "receita", "#66BB6A"),
@@ -49,7 +52,6 @@ CONTAS_PADRAO = [
 # Engine / conexão
 # --------------------------------------------------------------------------- #
 def _database_url() -> str:
-    # 1. Streamlit secrets (disponível quando rodando sob o Streamlit).
     try:
         import streamlit as st
 
@@ -57,11 +59,9 @@ def _database_url() -> str:
             return str(st.secrets["DATABASE_URL"])
     except Exception:
         pass
-    # 2. Variável de ambiente.
     url = os.environ.get("DATABASE_URL")
     if url:
         return url
-    # 3. Fallback local: SQLite.
     os.makedirs(DATA_DIR, exist_ok=True)
     return f"sqlite:///{DB_PATH}"
 
@@ -71,7 +71,6 @@ def get_engine() -> Engine:
     url = _database_url()
     if url.startswith("sqlite"):
         return create_engine(url, future=True)
-    # Postgres (Neon e afins): pré-ping trata conexões ociosas/hibernadas.
     return create_engine(url, future=True, pool_pre_ping=True, pool_recycle=300)
 
 
@@ -80,14 +79,12 @@ def _is_sqlite() -> bool:
 
 
 def _mes_expr(coluna: str) -> str:
-    """Expressão SQL que extrai 'AAAA-MM' de uma coluna de data (TEXT)."""
     if _is_sqlite():
         return f"strftime('%Y-%m', {coluna})"
     return f"to_char(CAST({coluna} AS DATE), 'YYYY-MM')"
 
 
 def _coluna_existe(conn, tabela: str, coluna: str) -> bool:
-    """Verifica se uma coluna existe na tabela (dialeto-aware)."""
     if _is_sqlite():
         rows = conn.execute(text(f"PRAGMA table_info({tabela})")).fetchall()
         return any(r[1] == coluna for r in rows)
@@ -97,6 +94,23 @@ def _coluna_existe(conn, tabela: str, coluna: str) -> bool:
             "WHERE table_name = :t AND column_name = :c"
         ),
         {"t": tabela, "c": coluna},
+    ).fetchone()
+    return row is not None
+
+
+def _tabela_existe(conn, tabela: str) -> bool:
+    if _is_sqlite():
+        row = conn.execute(
+            text("SELECT 1 FROM sqlite_master WHERE type='table' AND name=:t"),
+            {"t": tabela},
+        ).fetchone()
+        return row is not None
+    row = conn.execute(
+        text(
+            "SELECT 1 FROM information_schema.tables "
+            "WHERE table_schema='public' AND table_name=:t"
+        ),
+        {"t": tabela},
     ).fetchone()
     return row is not None
 
@@ -115,7 +129,7 @@ def _exec(sql: str, params) -> None:
 # Schema
 # --------------------------------------------------------------------------- #
 def init_db() -> None:
-    """Cria as tabelas (se não existirem) e popula dados padrão."""
+    """Cria as tabelas. Migra esquema pré-multiusuário recriando as tabelas."""
     sqlite = _is_sqlite()
     id_col = (
         "INTEGER PRIMARY KEY AUTOINCREMENT"
@@ -124,193 +138,290 @@ def init_db() -> None:
     )
     real = "REAL" if sqlite else "DOUBLE PRECISION"
 
-    ddl = [
-        f"""
-        CREATE TABLE IF NOT EXISTS contas (
-            id            {id_col},
-            nome          TEXT NOT NULL UNIQUE,
-            tipo          TEXT NOT NULL DEFAULT 'corrente',
-            saldo_inicial {real} NOT NULL DEFAULT 0
-        )
-        """,
-        f"""
-        CREATE TABLE IF NOT EXISTS categorias (
-            id   {id_col},
-            nome TEXT NOT NULL,
-            tipo TEXT NOT NULL CHECK (tipo IN ('receita', 'despesa')),
-            cor  TEXT NOT NULL DEFAULT '#607D8B',
-            UNIQUE (nome, tipo)
-        )
-        """,
-        f"""
-        CREATE TABLE IF NOT EXISTS lancamentos (
-            id            {id_col},
-            data          TEXT NOT NULL,
-            descricao     TEXT NOT NULL,
-            valor         {real} NOT NULL,
-            tipo          TEXT NOT NULL CHECK (tipo IN ('receita', 'despesa')),
-            conta_id      INTEGER NOT NULL REFERENCES contas(id) ON DELETE CASCADE,
-            categoria_id  INTEGER REFERENCES categorias(id) ON DELETE SET NULL,
-            pago          INTEGER NOT NULL DEFAULT 1,
-            transferencia INTEGER NOT NULL DEFAULT 0
-        )
-        """,
-        f"""
-        CREATE TABLE IF NOT EXISTS orcamentos (
-            id           {id_col},
-            categoria_id INTEGER NOT NULL REFERENCES categorias(id) ON DELETE CASCADE,
-            competencia  TEXT NOT NULL,
-            valor        {real} NOT NULL,
-            UNIQUE (categoria_id, competencia)
-        )
-        """,
-        f"""
-        CREATE TABLE IF NOT EXISTS metas (
-            id          {id_col},
-            nome        TEXT NOT NULL,
-            valor_alvo  {real} NOT NULL,
-            valor_atual {real} NOT NULL DEFAULT 0,
-            prazo       TEXT
-        )
-        """,
-        f"""
-        CREATE TABLE IF NOT EXISTS regras_categoria (
-            id            {id_col},
-            palavra_chave TEXT NOT NULL,
-            categoria_id  INTEGER NOT NULL REFERENCES categorias(id) ON DELETE CASCADE
-        )
-        """,
-    ]
-
     with get_engine().begin() as conn:
-        for stmt in ddl:
-            conn.execute(text(stmt))
-
-        # Migração: garante a coluna 'transferencia' em bancos criados antes dela.
-        if not _coluna_existe(conn, "lancamentos", "transferencia"):
+        # Migração: se o esquema antigo (sem user_id) existir, recria as tabelas
+        # de domínio no novo formato multiusuário. Só afeta dados pré-multiusuário
+        # (no máximo as categorias/contas padrão), pois o novo modelo é por usuário.
+        if _tabela_existe(conn, "lancamentos") and not _coluna_existe(
+            conn, "lancamentos", "user_id"
+        ):
             conn.execute(
                 text(
-                    "ALTER TABLE lancamentos "
-                    "ADD COLUMN transferencia INTEGER NOT NULL DEFAULT 0"
+                    "DROP TABLE IF EXISTS regras_categoria, metas, orcamentos, "
+                    "lancamentos, categorias, contas CASCADE"
+                    if not sqlite
+                    else "DROP TABLE IF EXISTS regras_categoria"
                 )
             )
+            if sqlite:
+                for t in ["metas", "orcamentos", "lancamentos", "categorias", "contas"]:
+                    conn.execute(text(f"DROP TABLE IF EXISTS {t}"))
 
-        n_cat = conn.execute(text("SELECT COUNT(*) FROM categorias")).scalar()
-        if n_cat == 0:
-            conn.execute(
-                text("INSERT INTO categorias (nome, tipo, cor) VALUES (:nome, :tipo, :cor)"),
-                [{"nome": n, "tipo": t, "cor": c} for n, t, c in CATEGORIAS_PADRAO],
+        conn.execute(
+            text(
+                f"""
+                CREATE TABLE IF NOT EXISTS users (
+                    id        {id_col},
+                    usuario   TEXT NOT NULL UNIQUE,
+                    senha_hash TEXT NOT NULL,
+                    salt      TEXT NOT NULL,
+                    criado_em TEXT NOT NULL
+                )
+                """
             )
-        n_contas = conn.execute(text("SELECT COUNT(*) FROM contas")).scalar()
-        if n_contas == 0:
-            conn.execute(
-                text(
-                    "INSERT INTO contas (nome, tipo, saldo_inicial) "
-                    "VALUES (:nome, :tipo, :saldo)"
-                ),
-                [{"nome": n, "tipo": t, "saldo": s} for n, t, s in CONTAS_PADRAO],
+        )
+        conn.execute(
+            text(
+                f"""
+                CREATE TABLE IF NOT EXISTS contas (
+                    id            {id_col},
+                    user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    nome          TEXT NOT NULL,
+                    tipo          TEXT NOT NULL DEFAULT 'corrente',
+                    saldo_inicial {real} NOT NULL DEFAULT 0,
+                    UNIQUE (user_id, nome)
+                )
+                """
             )
+        )
+        conn.execute(
+            text(
+                f"""
+                CREATE TABLE IF NOT EXISTS categorias (
+                    id      {id_col},
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    nome    TEXT NOT NULL,
+                    tipo    TEXT NOT NULL CHECK (tipo IN ('receita','despesa')),
+                    cor     TEXT NOT NULL DEFAULT '#607D8B',
+                    UNIQUE (user_id, nome, tipo)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                f"""
+                CREATE TABLE IF NOT EXISTS lancamentos (
+                    id            {id_col},
+                    user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    data          TEXT NOT NULL,
+                    descricao     TEXT NOT NULL,
+                    valor         {real} NOT NULL,
+                    tipo          TEXT NOT NULL CHECK (tipo IN ('receita','despesa')),
+                    conta_id      INTEGER NOT NULL REFERENCES contas(id) ON DELETE CASCADE,
+                    categoria_id  INTEGER REFERENCES categorias(id) ON DELETE SET NULL,
+                    pago          INTEGER NOT NULL DEFAULT 1,
+                    transferencia INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                f"""
+                CREATE TABLE IF NOT EXISTS orcamentos (
+                    id           {id_col},
+                    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    categoria_id INTEGER NOT NULL REFERENCES categorias(id) ON DELETE CASCADE,
+                    competencia  TEXT NOT NULL,
+                    valor        {real} NOT NULL,
+                    UNIQUE (categoria_id, competencia)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                f"""
+                CREATE TABLE IF NOT EXISTS metas (
+                    id          {id_col},
+                    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    nome        TEXT NOT NULL,
+                    valor_alvo  {real} NOT NULL,
+                    valor_atual {real} NOT NULL DEFAULT 0,
+                    prazo       TEXT
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                f"""
+                CREATE TABLE IF NOT EXISTS regras_categoria (
+                    id            {id_col},
+                    user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    palavra_chave TEXT NOT NULL,
+                    categoria_id  INTEGER NOT NULL REFERENCES categorias(id) ON DELETE CASCADE
+                )
+                """
+            )
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Usuários / autenticação
+# --------------------------------------------------------------------------- #
+def _hash_senha(senha: str, salt: str | None = None) -> tuple[str, str]:
+    if salt is None:
+        salt = binascii.hexlify(os.urandom(16)).decode()
+    h = hashlib.pbkdf2_hmac("sha256", senha.encode(), salt.encode(), 200_000)
+    return binascii.hexlify(h).decode(), salt
+
+
+def contar_usuarios() -> int:
+    with get_engine().connect() as conn:
+        return int(conn.execute(text("SELECT COUNT(*) FROM users")).scalar() or 0)
+
+
+def usuario_existe(usuario: str) -> bool:
+    with get_engine().connect() as conn:
+        row = conn.execute(
+            text("SELECT 1 FROM users WHERE lower(usuario) = lower(:u)"),
+            {"u": usuario.strip()},
+        ).fetchone()
+    return row is not None
+
+
+def _seed_usuario(conn, user_id: int) -> None:
+    conn.execute(
+        text("INSERT INTO categorias (user_id, nome, tipo, cor) VALUES (:u,:n,:t,:c)"),
+        [{"u": user_id, "n": n, "t": t, "c": c} for n, t, c in CATEGORIAS_PADRAO],
+    )
+    conn.execute(
+        text("INSERT INTO contas (user_id, nome, tipo, saldo_inicial) VALUES (:u,:n,:t,:s)"),
+        [{"u": user_id, "n": n, "t": t, "s": s} for n, t, s in CONTAS_PADRAO],
+    )
+
+
+def criar_usuario(usuario: str, senha: str) -> int:
+    """Cria um usuário (com categorias/contas padrão) e retorna seu id."""
+    usuario = usuario.strip()
+    senha_hash, salt = _hash_senha(senha)
+    with get_engine().begin() as conn:
+        res = conn.execute(
+            text(
+                "INSERT INTO users (usuario, senha_hash, salt, criado_em) "
+                "VALUES (:u, :h, :s, :d)"
+                + ("" if _is_sqlite() else " RETURNING id")
+            ),
+            {"u": usuario, "h": senha_hash, "s": salt, "d": datetime.utcnow().isoformat()},
+        )
+        if _is_sqlite():
+            user_id = int(
+                conn.execute(text("SELECT id FROM users WHERE usuario = :u"), {"u": usuario}).scalar()
+            )
+        else:
+            user_id = int(res.scalar())
+        _seed_usuario(conn, user_id)
+    return user_id
+
+
+def autenticar(usuario: str, senha: str) -> int | None:
+    """Retorna o id do usuário se as credenciais conferirem; senão, None."""
+    with get_engine().connect() as conn:
+        row = conn.execute(
+            text("SELECT id, senha_hash, salt FROM users WHERE lower(usuario) = lower(:u)"),
+            {"u": usuario.strip()},
+        ).fetchone()
+    if not row:
+        return None
+    calc, _ = _hash_senha(senha, row[2])
+    if hmac.compare_digest(calc, row[1]):
+        return int(row[0])
+    return None
 
 
 # --------------------------------------------------------------------------- #
 # Contas
 # --------------------------------------------------------------------------- #
-def listar_contas() -> pd.DataFrame:
-    return _read("SELECT * FROM contas ORDER BY nome")
+def listar_contas(user_id: int) -> pd.DataFrame:
+    return _read("SELECT * FROM contas WHERE user_id = :u ORDER BY nome", {"u": user_id})
 
 
-def criar_conta(nome: str, tipo: str, saldo_inicial: float) -> None:
+def criar_conta(user_id: int, nome: str, tipo: str, saldo_inicial: float) -> None:
     _exec(
-        "INSERT INTO contas (nome, tipo, saldo_inicial) VALUES (:nome, :tipo, :saldo)",
-        {"nome": nome.strip(), "tipo": tipo, "saldo": saldo_inicial},
+        "INSERT INTO contas (user_id, nome, tipo, saldo_inicial) VALUES (:u,:n,:t,:s)",
+        {"u": user_id, "n": nome.strip(), "t": tipo, "s": saldo_inicial},
     )
 
 
-def excluir_conta(conta_id: int) -> None:
-    _exec("DELETE FROM contas WHERE id = :id", {"id": conta_id})
+def excluir_conta(user_id: int, conta_id: int) -> None:
+    _exec("DELETE FROM contas WHERE id = :id AND user_id = :u", {"id": conta_id, "u": user_id})
 
 
-def saldo_por_conta() -> pd.DataFrame:
-    """Saldo atual = saldo inicial + receitas pagas - despesas pagas."""
+def saldo_por_conta(user_id: int) -> pd.DataFrame:
     return _read(
         """
         SELECT c.id, c.nome, c.tipo, c.saldo_inicial,
                c.saldo_inicial
-                 + COALESCE(SUM(CASE WHEN l.pago = 1 AND l.tipo = 'receita'
-                                     THEN l.valor
-                                     WHEN l.pago = 1 AND l.tipo = 'despesa'
-                                     THEN -l.valor ELSE 0 END), 0) AS saldo_atual
+                 + COALESCE(SUM(CASE WHEN l.pago = 1 AND l.tipo = 'receita' THEN l.valor
+                                     WHEN l.pago = 1 AND l.tipo = 'despesa' THEN -l.valor
+                                     ELSE 0 END), 0) AS saldo_atual
         FROM contas c
         LEFT JOIN lancamentos l ON l.conta_id = c.id
+        WHERE c.user_id = :u
         GROUP BY c.id, c.nome, c.tipo, c.saldo_inicial
         ORDER BY c.nome
-        """
+        """,
+        {"u": user_id},
     )
 
 
 # --------------------------------------------------------------------------- #
 # Categorias
 # --------------------------------------------------------------------------- #
-def listar_categorias(tipo: str | None = None) -> pd.DataFrame:
+def listar_categorias(user_id: int, tipo: str | None = None) -> pd.DataFrame:
     if tipo:
         return _read(
-            "SELECT * FROM categorias WHERE tipo = :tipo ORDER BY nome",
-            {"tipo": tipo},
+            "SELECT * FROM categorias WHERE user_id = :u AND tipo = :t ORDER BY nome",
+            {"u": user_id, "t": tipo},
         )
-    return _read("SELECT * FROM categorias ORDER BY tipo, nome")
-
-
-def criar_categoria(nome: str, tipo: str, cor: str) -> None:
-    _exec(
-        "INSERT INTO categorias (nome, tipo, cor) VALUES (:nome, :tipo, :cor)",
-        {"nome": nome.strip(), "tipo": tipo, "cor": cor},
+    return _read(
+        "SELECT * FROM categorias WHERE user_id = :u ORDER BY tipo, nome", {"u": user_id}
     )
 
 
-def excluir_categoria(categoria_id: int) -> None:
-    _exec("DELETE FROM categorias WHERE id = :id", {"id": categoria_id})
+def criar_categoria(user_id: int, nome: str, tipo: str, cor: str) -> None:
+    _exec(
+        "INSERT INTO categorias (user_id, nome, tipo, cor) VALUES (:u,:n,:t,:c)",
+        {"u": user_id, "n": nome.strip(), "t": tipo, "c": cor},
+    )
+
+
+def excluir_categoria(user_id: int, categoria_id: int) -> None:
+    _exec(
+        "DELETE FROM categorias WHERE id = :id AND user_id = :u",
+        {"id": categoria_id, "u": user_id},
+    )
 
 
 # --------------------------------------------------------------------------- #
 # Lançamentos
 # --------------------------------------------------------------------------- #
 def criar_lancamento(
-    data_lanc: date,
-    descricao: str,
-    valor: float,
-    tipo: str,
-    conta_id: int,
-    categoria_id: int | None,
-    pago: bool,
+    user_id: int, data_lanc: date, descricao: str, valor: float, tipo: str,
+    conta_id: int, categoria_id: int | None, pago: bool,
 ) -> None:
     _exec(
         """
         INSERT INTO lancamentos
-            (data, descricao, valor, tipo, conta_id, categoria_id, pago)
-        VALUES (:data, :descricao, :valor, :tipo, :conta_id, :categoria_id, :pago)
+            (user_id, data, descricao, valor, tipo, conta_id, categoria_id, pago)
+        VALUES (:u, :data, :descricao, :valor, :tipo, :conta_id, :categoria_id, :pago)
         """,
         {
-            "data": data_lanc.isoformat(),
-            "descricao": descricao.strip(),
-            "valor": abs(valor),
-            "tipo": tipo,
-            "conta_id": conta_id,
-            "categoria_id": categoria_id,
-            "pago": int(pago),
+            "u": user_id, "data": data_lanc.isoformat(), "descricao": descricao.strip(),
+            "valor": abs(valor), "tipo": tipo, "conta_id": conta_id,
+            "categoria_id": categoria_id, "pago": int(pago),
         },
     )
 
 
-def criar_lancamentos_em_lote(itens: list[dict]) -> int:
-    """Insere vários lançamentos (parcelas, recorrências, importação)."""
+def criar_lancamentos_em_lote(user_id: int, itens: list[dict]) -> int:
     linhas = [
         {
-            "data": item["data"].isoformat(),
-            "descricao": item["descricao"].strip(),
-            "valor": abs(float(item["valor"])),
-            "tipo": item["tipo"],
-            "conta_id": int(item["conta_id"]),
-            "categoria_id": item.get("categoria_id"),
+            "u": user_id, "data": item["data"].isoformat(), "descricao": item["descricao"].strip(),
+            "valor": abs(float(item["valor"])), "tipo": item["tipo"],
+            "conta_id": int(item["conta_id"]), "categoria_id": item.get("categoria_id"),
             "pago": int(item.get("pago", True)),
         }
         for item in itens
@@ -320,8 +431,8 @@ def criar_lancamentos_em_lote(itens: list[dict]) -> int:
     _exec(
         """
         INSERT INTO lancamentos
-            (data, descricao, valor, tipo, conta_id, categoria_id, pago)
-        VALUES (:data, :descricao, :valor, :tipo, :conta_id, :categoria_id, :pago)
+            (user_id, data, descricao, valor, tipo, conta_id, categoria_id, pago)
+        VALUES (:u, :data, :descricao, :valor, :tipo, :conta_id, :categoria_id, :pago)
         """,
         linhas,
     )
@@ -329,46 +440,36 @@ def criar_lancamentos_em_lote(itens: list[dict]) -> int:
 
 
 def atualizar_lancamento(
-    lancamento_id: int,
-    data_lanc: date,
-    descricao: str,
-    valor: float,
-    tipo: str,
-    conta_id: int,
-    categoria_id: int | None,
-    pago: bool,
+    user_id: int, lancamento_id: int, data_lanc: date, descricao: str, valor: float,
+    tipo: str, conta_id: int, categoria_id: int | None, pago: bool,
 ) -> None:
     _exec(
         """
         UPDATE lancamentos
         SET data = :data, descricao = :descricao, valor = :valor, tipo = :tipo,
             conta_id = :conta_id, categoria_id = :categoria_id, pago = :pago
-        WHERE id = :id
+        WHERE id = :id AND user_id = :u
         """,
         {
-            "id": lancamento_id,
-            "data": data_lanc.isoformat(),
-            "descricao": descricao.strip(),
-            "valor": abs(valor),
-            "tipo": tipo,
-            "conta_id": conta_id,
-            "categoria_id": categoria_id,
-            "pago": int(pago),
+            "id": lancamento_id, "u": user_id, "data": data_lanc.isoformat(),
+            "descricao": descricao.strip(), "valor": abs(valor), "tipo": tipo,
+            "conta_id": conta_id, "categoria_id": categoria_id, "pago": int(pago),
         },
     )
 
 
-def excluir_lancamento(lancamento_id: int) -> None:
-    _exec("DELETE FROM lancamentos WHERE id = :id", {"id": lancamento_id})
+def excluir_lancamento(user_id: int, lancamento_id: int) -> None:
+    _exec(
+        "DELETE FROM lancamentos WHERE id = :id AND user_id = :u",
+        {"id": lancamento_id, "u": user_id},
+    )
 
 
 def listar_lancamentos(
-    inicio: date | None = None,
-    fim: date | None = None,
+    user_id: int, inicio: date | None = None, fim: date | None = None,
     tipo: str | None = None,
 ) -> pd.DataFrame:
-    """Retorna lançamentos com nomes de conta/categoria já resolvidos."""
-    clausulas, params = [], {}
+    clausulas, params = ["l.user_id = :u"], {"u": user_id}
     if inicio:
         clausulas.append("l.data >= :inicio")
         params["inicio"] = inicio.isoformat()
@@ -378,7 +479,7 @@ def listar_lancamentos(
     if tipo:
         clausulas.append("l.tipo = :tipo")
         params["tipo"] = tipo
-    where = ("WHERE " + " AND ".join(clausulas)) if clausulas else ""
+    where = "WHERE " + " AND ".join(clausulas)
 
     df = _read(
         f"""
@@ -401,20 +502,19 @@ def listar_lancamentos(
 # --------------------------------------------------------------------------- #
 # Orçamentos
 # --------------------------------------------------------------------------- #
-def definir_orcamento(categoria_id: int, competencia: str, valor: float) -> None:
+def definir_orcamento(user_id: int, categoria_id: int, competencia: str, valor: float) -> None:
     _exec(
         """
-        INSERT INTO orcamentos (categoria_id, competencia, valor)
-        VALUES (:categoria_id, :competencia, :valor)
+        INSERT INTO orcamentos (user_id, categoria_id, competencia, valor)
+        VALUES (:u, :categoria_id, :competencia, :valor)
         ON CONFLICT (categoria_id, competencia)
         DO UPDATE SET valor = excluded.valor
         """,
-        {"categoria_id": categoria_id, "competencia": competencia, "valor": valor},
+        {"u": user_id, "categoria_id": categoria_id, "competencia": competencia, "valor": valor},
     )
 
 
-def orcamento_vs_realizado(competencia: str) -> pd.DataFrame:
-    """Compara o orçado com o gasto (despesas pagas) em uma competência AAAA-MM."""
+def orcamento_vs_realizado(user_id: int, competencia: str) -> pd.DataFrame:
     return _read(
         f"""
         SELECT cat.nome AS categoria, cat.cor AS cor,
@@ -422,102 +522,88 @@ def orcamento_vs_realizado(competencia: str) -> pd.DataFrame:
                COALESCE((
                    SELECT SUM(l.valor) FROM lancamentos l
                    WHERE l.categoria_id = cat.id
-                     AND l.tipo = 'despesa' AND l.pago = 1
-                     AND l.transferencia = 0
+                     AND l.tipo = 'despesa' AND l.pago = 1 AND l.transferencia = 0
                      AND {_mes_expr('l.data')} = :competencia
                ), 0) AS gasto
         FROM categorias cat
         LEFT JOIN orcamentos o
                ON o.categoria_id = cat.id AND o.competencia = :competencia
-        WHERE cat.tipo = 'despesa'
+        WHERE cat.tipo = 'despesa' AND cat.user_id = :u
         ORDER BY cat.nome
         """,
-        {"competencia": competencia},
+        {"u": user_id, "competencia": competencia},
     )
 
 
 # --------------------------------------------------------------------------- #
 # Metas de economia
 # --------------------------------------------------------------------------- #
-def listar_metas() -> pd.DataFrame:
-    return _read("SELECT * FROM metas ORDER BY id")
+def listar_metas(user_id: int) -> pd.DataFrame:
+    return _read("SELECT * FROM metas WHERE user_id = :u ORDER BY id", {"u": user_id})
 
 
-def criar_meta(nome: str, valor_alvo: float, valor_atual: float, prazo) -> None:
+def criar_meta(user_id: int, nome: str, valor_alvo: float, valor_atual: float, prazo) -> None:
     _exec(
-        """
-        INSERT INTO metas (nome, valor_alvo, valor_atual, prazo)
-        VALUES (:nome, :alvo, :atual, :prazo)
-        """,
+        "INSERT INTO metas (user_id, nome, valor_alvo, valor_atual, prazo) "
+        "VALUES (:u, :nome, :alvo, :atual, :prazo)",
         {
-            "nome": nome.strip(),
-            "alvo": float(valor_alvo),
-            "atual": float(valor_atual),
-            "prazo": prazo.isoformat() if prazo else None,
+            "u": user_id, "nome": nome.strip(), "alvo": float(valor_alvo),
+            "atual": float(valor_atual), "prazo": prazo.isoformat() if prazo else None,
         },
     )
 
 
-def atualizar_valor_meta(meta_id: int, novo_valor: float) -> None:
+def atualizar_valor_meta(user_id: int, meta_id: int, novo_valor: float) -> None:
     _exec(
-        "UPDATE metas SET valor_atual = :valor WHERE id = :id",
-        {"valor": max(0.0, float(novo_valor)), "id": meta_id},
+        "UPDATE metas SET valor_atual = :valor WHERE id = :id AND user_id = :u",
+        {"valor": max(0.0, float(novo_valor)), "id": meta_id, "u": user_id},
     )
 
 
-def excluir_meta(meta_id: int) -> None:
-    _exec("DELETE FROM metas WHERE id = :id", {"id": meta_id})
+def excluir_meta(user_id: int, meta_id: int) -> None:
+    _exec("DELETE FROM metas WHERE id = :id AND user_id = :u", {"id": meta_id, "u": user_id})
 
 
 # --------------------------------------------------------------------------- #
 # Transferências entre contas
 # --------------------------------------------------------------------------- #
 def criar_transferencia(
-    data_transf: date,
-    valor: float,
-    conta_origem_id: int,
-    conta_destino_id: int,
-    descricao: str = "",
+    user_id: int, data_transf: date, valor: float,
+    conta_origem_id: int, conta_destino_id: int, descricao: str = "",
 ) -> None:
-    """Registra uma transferência como dois lançamentos marcados (transferencia=1).
-
-    Sai como despesa na conta de origem e entra como receita na de destino.
-    Transferências afetam o saldo das contas, mas NÃO contam como receita/despesa
-    nos relatórios e no orçamento.
-    """
     if conta_origem_id == conta_destino_id:
         raise ValueError("A conta de origem e destino devem ser diferentes.")
     valor = abs(float(valor))
     with get_engine().begin() as conn:
         nomes = dict(
-            conn.execute(text("SELECT id, nome FROM contas")).fetchall()
+            conn.execute(
+                text("SELECT id, nome FROM contas WHERE user_id = :u"), {"u": user_id}
+            ).fetchall()
         )
         origem = nomes.get(conta_origem_id, "?")
         destino = nomes.get(conta_destino_id, "?")
         sufixo = f" — {descricao.strip()}" if descricao.strip() else ""
         linhas = [
             {
-                "data": data_transf.isoformat(),
+                "u": user_id, "data": data_transf.isoformat(),
                 "descricao": f"Transferência para {destino}{sufixo}",
-                "valor": valor, "tipo": "despesa",
-                "conta_id": conta_origem_id, "categoria_id": None,
-                "pago": 1, "transferencia": 1,
+                "valor": valor, "tipo": "despesa", "conta_id": conta_origem_id,
+                "categoria_id": None, "pago": 1, "transferencia": 1,
             },
             {
-                "data": data_transf.isoformat(),
+                "u": user_id, "data": data_transf.isoformat(),
                 "descricao": f"Transferência de {origem}{sufixo}",
-                "valor": valor, "tipo": "receita",
-                "conta_id": conta_destino_id, "categoria_id": None,
-                "pago": 1, "transferencia": 1,
+                "valor": valor, "tipo": "receita", "conta_id": conta_destino_id,
+                "categoria_id": None, "pago": 1, "transferencia": 1,
             },
         ]
         conn.execute(
             text(
                 """
                 INSERT INTO lancamentos
-                    (data, descricao, valor, tipo, conta_id, categoria_id, pago, transferencia)
+                    (user_id, data, descricao, valor, tipo, conta_id, categoria_id, pago, transferencia)
                 VALUES
-                    (:data, :descricao, :valor, :tipo, :conta_id, :categoria_id, :pago, :transferencia)
+                    (:u, :data, :descricao, :valor, :tipo, :conta_id, :categoria_id, :pago, :transferencia)
                 """
             ),
             linhas,
@@ -525,39 +611,39 @@ def criar_transferencia(
 
 
 # --------------------------------------------------------------------------- #
-# Regras de categorização automática (por palavra-chave)
+# Regras de categorização automática
 # --------------------------------------------------------------------------- #
-def listar_regras() -> pd.DataFrame:
+def listar_regras(user_id: int) -> pd.DataFrame:
     return _read(
         """
         SELECT r.id, r.palavra_chave, r.categoria_id,
                cat.nome AS categoria, cat.tipo AS tipo, cat.cor AS cor
         FROM regras_categoria r
         JOIN categorias cat ON cat.id = r.categoria_id
+        WHERE r.user_id = :u
         ORDER BY r.palavra_chave
-        """
+        """,
+        {"u": user_id},
     )
 
 
-def criar_regra(palavra_chave: str, categoria_id: int) -> None:
+def criar_regra(user_id: int, palavra_chave: str, categoria_id: int) -> None:
     _exec(
-        "INSERT INTO regras_categoria (palavra_chave, categoria_id) "
-        "VALUES (:palavra, :cat)",
-        {"palavra": palavra_chave.strip(), "cat": categoria_id},
+        "INSERT INTO regras_categoria (user_id, palavra_chave, categoria_id) "
+        "VALUES (:u, :palavra, :cat)",
+        {"u": user_id, "palavra": palavra_chave.strip(), "cat": categoria_id},
     )
 
 
-def excluir_regra(regra_id: int) -> None:
-    _exec("DELETE FROM regras_categoria WHERE id = :id", {"id": regra_id})
+def excluir_regra(user_id: int, regra_id: int) -> None:
+    _exec(
+        "DELETE FROM regras_categoria WHERE id = :id AND user_id = :u",
+        {"id": regra_id, "u": user_id},
+    )
 
 
-def regras_para_matching() -> list[tuple[str, int]]:
-    """Retorna [(palavra_lower, categoria_id)] ordenadas por comprimento (desc).
-
-    A ordenação por comprimento faz a palavra mais específica vencer
-    (ex.: 'supermercado' antes de 'super').
-    """
-    df = listar_regras()
+def regras_para_matching(user_id: int) -> list[tuple[str, int]]:
+    df = listar_regras(user_id)
     if df.empty:
         return []
     regras = [
@@ -568,10 +654,7 @@ def regras_para_matching() -> list[tuple[str, int]]:
     return sorted(regras, key=lambda x: len(x[0]), reverse=True)
 
 
-def sugerir_categoria(descricao: str, regras: list[tuple[str, int]] | None = None) -> int | None:
-    """Retorna o categoria_id da primeira regra cuja palavra aparece na descrição."""
-    if regras is None:
-        regras = regras_para_matching()
+def sugerir_categoria(descricao: str, regras: list[tuple[str, int]]) -> int | None:
     texto = (descricao or "").lower()
     for palavra, categoria_id in regras:
         if palavra and palavra in texto:

@@ -5,12 +5,11 @@ from __future__ import annotations
 import streamlit as st
 
 import db
-from auth import botao_sair, require_login
+from auth import require_login
 
 st.set_page_config(page_title="Categorias • Meu Dinheiro", page_icon="🏷️", layout="wide")
-require_login()
 db.init_db()
-botao_sair()
+user_id = require_login()
 
 st.title("🏷️ Categorias")
 
@@ -28,7 +27,7 @@ with st.expander("➕ Nova categoria", expanded=True):
                 st.error("Informe o nome da categoria.")
             else:
                 try:
-                    db.criar_categoria(nome, tipo, cor)
+                    db.criar_categoria(user_id, nome, tipo, cor)
                     st.success(f"Categoria '{nome}' criada!")
                     st.rerun()
                 except Exception:
@@ -40,7 +39,7 @@ col_desp, col_rec = st.columns(2)
 
 with col_desp:
     st.subheader("Despesas")
-    for _, row in db.listar_categorias(tipo="despesa").iterrows():
+    for _, row in db.listar_categorias(user_id, tipo="despesa").iterrows():
         c = st.columns([1, 5, 1])
         c[0].markdown(
             f"<div style='width:18px;height:18px;border-radius:4px;"
@@ -49,12 +48,12 @@ with col_desp:
         )
         c[1].write(row["nome"])
         if c[2].button("🗑️", key=f"delcat_{row['id']}"):
-            db.excluir_categoria(int(row["id"]))
+            db.excluir_categoria(user_id, int(row["id"]))
             st.rerun()
 
 with col_rec:
     st.subheader("Receitas")
-    for _, row in db.listar_categorias(tipo="receita").iterrows():
+    for _, row in db.listar_categorias(user_id, tipo="receita").iterrows():
         c = st.columns([1, 5, 1])
         c[0].markdown(
             f"<div style='width:18px;height:18px;border-radius:4px;"
@@ -63,7 +62,7 @@ with col_rec:
         )
         c[1].write(row["nome"])
         if c[2].button("🗑️", key=f"delcatr_{row['id']}"):
-            db.excluir_categoria(int(row["id"]))
+            db.excluir_categoria(user_id, int(row["id"]))
             st.rerun()
 
 st.caption("Ao excluir uma categoria, os lançamentos ligados a ela ficam 'Sem categoria'.")

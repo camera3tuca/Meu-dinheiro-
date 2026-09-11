@@ -8,13 +8,12 @@ import plotly.express as px
 import streamlit as st
 
 import db
-from auth import botao_sair, require_login
+from auth import require_login
 from utils import brl, competencia_legivel
 
 st.set_page_config(page_title="Orçamento • Meu Dinheiro", page_icon="🎯", layout="wide")
-require_login()
 db.init_db()
-botao_sair()
+user_id = require_login()
 
 st.title("🎯 Orçamento mensal")
 
@@ -33,7 +32,7 @@ competencia = st.selectbox(
 )
 
 st.subheader("Definir limites por categoria")
-dados = db.orcamento_vs_realizado(competencia)
+dados = db.orcamento_vs_realizado(user_id, competencia)
 
 with st.form("form_orcamento"):
     valores = {}
@@ -49,10 +48,10 @@ with st.form("form_orcamento"):
             format="%.2f", label_visibility="collapsed",
         )
     if st.form_submit_button("Salvar orçamento", type="primary"):
-        cats = db.listar_categorias(tipo="despesa")
+        cats = db.listar_categorias(user_id, tipo="despesa")
         for nome, valor in valores.items():
             cat_id = int(cats.loc[cats["nome"] == nome, "id"].iloc[0])
-            db.definir_orcamento(cat_id, competencia, valor)
+            db.definir_orcamento(user_id, cat_id, competencia, valor)
         st.success("Orçamento salvo!")
         st.rerun()
 

@@ -13,14 +13,13 @@ import plotly.express as px
 import streamlit as st
 
 import db
-from auth import botao_sair, require_login
+from auth import require_login
 from utils import brl, competencia_atual, competencia_legivel
 
 st.set_page_config(page_title="Meu Dinheiro", page_icon="💰", layout="wide")
 
-require_login()
 db.init_db()
-botao_sair()
+user_id = require_login()
 
 st.title("💰 Meu Dinheiro")
 st.caption("Monitor de finanças pessoais — controle de receitas, despesas e orçamento.")
@@ -28,7 +27,7 @@ st.caption("Monitor de finanças pessoais — controle de receitas, despesas e o
 # ----------------------------------------------------------------------------- #
 # Filtro de competência (mês)
 # ----------------------------------------------------------------------------- #
-lanc_todos = db.listar_lancamentos()
+lanc_todos = db.listar_lancamentos(user_id)
 if lanc_todos.empty:
     competencias = [competencia_atual()]
 else:
@@ -48,7 +47,7 @@ inicio = date(ano, mes, 1)
 fim = date(ano + (mes == 12), (mes % 12) + 1, 1) - pd.Timedelta(days=1)
 fim = fim.date() if hasattr(fim, "date") else fim
 
-lanc = db.listar_lancamentos(inicio=inicio, fim=fim)
+lanc = db.listar_lancamentos(user_id, inicio=inicio, fim=fim)
 # Transferências entre contas não contam como receita/despesa nos indicadores.
 mov = lanc[lanc["transferencia"] == 0] if not lanc.empty else lanc
 
@@ -64,7 +63,7 @@ c1.metric("Receitas do mês", brl(receitas))
 c2.metric("Despesas do mês", brl(despesas))
 c3.metric("Saldo do mês", brl(saldo_mes), delta=brl(saldo_mes))
 
-saldos = db.saldo_por_conta()
+saldos = db.saldo_por_conta(user_id)
 patrimonio = saldos["saldo_atual"].sum() if not saldos.empty else 0.0
 c4.metric("Saldo total (contas)", brl(patrimonio))
 

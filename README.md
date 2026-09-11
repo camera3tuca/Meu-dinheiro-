@@ -27,8 +27,9 @@ Esta é a primeira versão (MVP) usada para desenvolver e validar o sistema.
 - **Metas de economia:** objetivos de poupança (viagem, reserva, etc.) com barra de
   progresso, prazo opcional e atualização do valor guardado.
 - **Relatórios:** evolução mensal, maiores despesas por categoria, **relatório anual**
-  e exportação em **CSV, Excel e PDF**.
-- **Acesso protegido (opcional):** login por senha (`APP_PASSWORD`) para uso pessoal na web.
+  e exportação em **CSV, Excel e PDF** (o PDF traz gráficos embutidos).
+- **Multiusuário:** cada pessoa cria seu login e vê **apenas os seus próprios dados**
+  (senha guardada com hash PBKDF2). Cadastro pode ser restrito por um código de convite.
 
 Os dados padrão (categorias e contas) são criados automaticamente na primeira execução.
 
@@ -80,10 +81,10 @@ O app já está pronto para publicação gratuita no
    - **Repository:** `camera3tuca/Meu-dinheiro-`
    - **Branch:** `main`
    - **Main file path:** `app.py`
-4. Em **Advanced settings → Secrets**, cole a conexão do PostgreSQL e (opcional) a senha:
+4. Em **Advanced settings → Secrets**, cole a conexão do PostgreSQL:
    ```toml
    DATABASE_URL = "postgresql://USUARIO:SENHA@HOST/BANCO?sslmode=require"
-   APP_PASSWORD = "sua-senha-de-acesso"   # opcional: exige login no app
+   # REGISTRATION_CODE = "convite"   # opcional: exige código para criar conta
    ```
    (Opcional) escolha a versão do Python (3.11+).
 5. Clique em **Deploy**. Em ~2 minutos o app estará no ar em uma URL pública
@@ -134,6 +135,6 @@ e o tema visual vem de `.streamlit/config.toml`.
 
 ## 🛣️ Próximos passos (ideias)
 
-- Múltiplos usuários (hoje o login é uma senha única compartilhada)
-- Gráficos embutidos no PDF e agendamento de relatórios por e-mail
 - Aplicativo instalável (PWA) para o celular
+- Agendamento de relatórios por e-mail
+- Edição/gestão de conta do usuário (trocar senha)

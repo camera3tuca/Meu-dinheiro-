@@ -7,18 +7,17 @@ import plotly.express as px
 import streamlit as st
 
 import db
-from auth import botao_sair, require_login
+from auth import require_login
 from relatorios_export import build_excel, build_pdf
 from utils import MESES_PT, brl, competencia_legivel
 
 st.set_page_config(page_title="Relatórios • Meu Dinheiro", page_icon="📊", layout="wide")
-require_login()
 db.init_db()
-botao_sair()
+user_id = require_login()
 
 st.title("📊 Relatórios")
 
-lanc = db.listar_lancamentos()
+lanc = db.listar_lancamentos(user_id)
 if lanc.empty:
     st.info("Ainda não há lançamentos para gerar relatórios.")
     st.stop()

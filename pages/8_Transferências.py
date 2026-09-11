@@ -7,13 +7,12 @@ from datetime import date
 import streamlit as st
 
 import db
-from auth import botao_sair, require_login
+from auth import require_login
 from utils import brl
 
 st.set_page_config(page_title="Transferências • Meu Dinheiro", page_icon="🔁", layout="wide")
-require_login()
 db.init_db()
-botao_sair()
+user_id = require_login()
 
 st.title("🔁 Transferências entre contas")
 st.caption(
@@ -21,7 +20,7 @@ st.caption(
     "contas, mas **não** contam como receita ou despesa nos relatórios."
 )
 
-contas = db.listar_contas()
+contas = db.listar_contas(user_id)
 if len(contas) < 2:
     st.warning("Cadastre pelo menos **duas contas** na página **Contas** para transferir.")
     st.stop()
@@ -47,7 +46,7 @@ with st.form("form_transferencia", clear_on_submit=True):
         else:
             origem_id = int(contas.loc[contas["nome"] == origem, "id"].iloc[0])
             destino_id = int(contas.loc[contas["nome"] == destino, "id"].iloc[0])
-            db.criar_transferencia(data_transf, valor, origem_id, destino_id, descricao)
+            db.criar_transferencia(user_id, data_transf, valor, origem_id, destino_id, descricao)
             st.success(f"Transferência de {brl(valor)}: {origem} → {destino}")
             st.rerun()
 
@@ -55,7 +54,7 @@ st.divider()
 
 # Saldos atualizados
 st.subheader("Saldos das contas")
-saldos = db.saldo_por_conta()
+saldos = db.saldo_por_conta(user_id)
 cols = st.columns(min(len(saldos), 4) or 1)
 for i, (_, row) in enumerate(saldos.iterrows()):
     cols[i % len(cols)].metric(row["nome"], brl(row["saldo_atual"]))
@@ -64,7 +63,7 @@ st.divider()
 
 # Histórico de transferências
 st.subheader("Últimas transferências")
-lanc = db.listar_lancamentos()
+lanc = db.listar_lancamentos(user_id)
 transf = lanc[(lanc["transferencia"] == 1) & (lanc["tipo"] == "despesa")] if not lanc.empty else lanc
 if transf.empty:
     st.info("Nenhuma transferência registrada ainda.")
@@ -75,7 +74,7 @@ else:
         c[1].write(f"🔁 {row['descricao']}")
         c[2].write(brl(row["valor"]))
         if c[3].button("🗑️", key=f"delt_{row['id']}", help="Excluir transferência (só este lado)"):
-            db.excluir_lancamento(int(row["id"]))
+            db.excluir_lancamento(user_id, int(row["id"]))
             st.rerun()
     st.caption(
         "Cada transferência gera dois lançamentos (saída e entrada). Excluir aqui "

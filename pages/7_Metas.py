@@ -8,13 +8,12 @@ import pandas as pd
 import streamlit as st
 
 import db
-from auth import botao_sair, require_login
+from auth import require_login
 from utils import brl
 
 st.set_page_config(page_title="Metas • Meu Dinheiro", page_icon="🐖", layout="wide")
-require_login()
 db.init_db()
-botao_sair()
+user_id = require_login()
 
 st.title("🐖 Metas de economia")
 st.caption("Defina objetivos (viagem, reserva de emergência, etc.) e acompanhe quanto já juntou.")
@@ -38,7 +37,7 @@ with st.expander("➕ Nova meta", expanded=True):
             elif alvo <= 0:
                 st.error("O valor alvo deve ser maior que zero.")
             else:
-                db.criar_meta(nome, alvo, inicial, prazo)
+                db.criar_meta(user_id, nome, alvo, inicial, prazo)
                 st.success(f"Meta '{nome}' criada!")
                 st.rerun()
 
@@ -47,7 +46,7 @@ st.divider()
 # ----------------------------------------------------------------------------- #
 # Lista de metas
 # ----------------------------------------------------------------------------- #
-metas = db.listar_metas()
+metas = db.listar_metas(user_id)
 if metas.empty:
     st.info("Nenhuma meta cadastrada ainda. Crie a primeira acima. 🎯")
 else:
@@ -80,8 +79,8 @@ else:
                 format="%.2f", key=f"upd_{meta['id']}",
             )
             if acao[1].button("💾 Salvar", key=f"save_{meta['id']}"):
-                db.atualizar_valor_meta(int(meta["id"]), novo_valor)
+                db.atualizar_valor_meta(user_id, int(meta["id"]), novo_valor)
                 st.rerun()
             if acao[2].button("🗑️ Excluir", key=f"delm_{meta['id']}"):
-                db.excluir_meta(int(meta["id"]))
+                db.excluir_meta(user_id, int(meta["id"]))
                 st.rerun()

@@ -5,13 +5,12 @@ from __future__ import annotations
 import streamlit as st
 
 import db
-from auth import botao_sair, require_login
+from auth import require_login
 from utils import brl
 
 st.set_page_config(page_title="Contas • Meu Dinheiro", page_icon="🏦", layout="wide")
-require_login()
 db.init_db()
-botao_sair()
+user_id = require_login()
 
 st.title("🏦 Contas")
 
@@ -35,7 +34,7 @@ with st.expander("➕ Nova conta", expanded=True):
                 st.error("Informe o nome da conta.")
             else:
                 try:
-                    db.criar_conta(nome, tipo, saldo)
+                    db.criar_conta(user_id, nome, tipo, saldo)
                     st.success(f"Conta '{nome}' criada!")
                     st.rerun()
                 except Exception:
@@ -44,7 +43,7 @@ with st.expander("➕ Nova conta", expanded=True):
 st.divider()
 st.subheader("Suas contas")
 
-saldos = db.saldo_por_conta()
+saldos = db.saldo_por_conta(user_id)
 if saldos.empty:
     st.info("Nenhuma conta cadastrada.")
 else:
@@ -57,6 +56,6 @@ else:
         cols[2].write(f"Inicial: {brl(row['saldo_inicial'])}")
         cols[3].write(f"Atual: {brl(row['saldo_atual'])}")
         if cols[4].button("🗑️", key=f"delc_{row['id']}", help="Excluir conta e seus lançamentos"):
-            db.excluir_conta(int(row["id"]))
+            db.excluir_conta(user_id, int(row["id"]))
             st.rerun()
     st.caption("Excluir uma conta remove também todos os seus lançamentos.")
