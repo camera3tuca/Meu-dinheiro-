@@ -1,0 +1,6 @@
+{
+  "name": "Meu Dinheiro",
+  "description": "Monitor de finanças pessoais — controle de receitas, despesas e orçamento.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

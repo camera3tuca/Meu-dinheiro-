@@ -1,7 +1,7 @@
 # 💰 Meu Dinheiro
 
-Monitor de **finanças pessoais** inspirado no [minhaseconomias.com.br](https://minhaseconomias.com.br),
-desenvolvido em **Python + Streamlit** com banco local **SQLite**.
+Sistema completo de controle e gestão de **finanças pessoais**,
+desenvolvido para acompanhamento de receitas, despesas, metas e orçamentos.
 
 Esta é a primeira versão (MVP) usada para desenvolver e validar o sistema.
 
