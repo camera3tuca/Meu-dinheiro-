@@ -10,7 +10,10 @@ import {
   Layers,
   Maximize2,
   X,
-  HelpCircle
+  HelpCircle,
+  Copy,
+  ExternalLink,
+  ShieldCheck
 } from 'lucide-react';
 import { ScienceBitLogo } from './ScienceBitLogo';
 import { PLAYSTORE_ASSETS, PlayStoreAssetData } from '../data/playstoreAssetsBase64';
@@ -20,6 +23,19 @@ export const PlayStoreKitView: React.FC = () => {
   const [downloadedItems, setDownloadedItems] = useState<Record<string, boolean>>({});
   const [previewAsset, setPreviewAsset] = useState<PlayStoreAssetData | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [copiedPolicy, setCopiedPolicy] = useState(false);
+
+  const privacyUrl = 'https://ais-pre-f62hdn35ttwszixw3hdor4-45073816214.us-west2.run.app/privacy.html';
+
+  const handleCopyPrivacyUrl = () => {
+    navigator.clipboard.writeText(privacyUrl);
+    setCopiedPolicy(true);
+    setStatusMessage('URL da Política de Privacidade copiada!');
+    setTimeout(() => {
+      setCopiedPolicy(false);
+      setStatusMessage(null);
+    }, 3000);
+  };
 
   const canShareFiles = typeof navigator !== 'undefined' && !!navigator.share && !!navigator.canShare;
 
@@ -174,6 +190,62 @@ export const PlayStoreKitView: React.FC = () => {
               <span>{downloadingZip ? 'Compactando...' : 'Baixar Todas as Imagens (.ZIP)'}</span>
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Privacy Policy Box (Required by Google Play Console) */}
+      <div className="bg-white rounded-2xl p-5 sm:p-6 border-2 border-emerald-500/40 shadow-xs space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-gray-900">
+                URL da Política de Privacidade (Google Play Console)
+              </h2>
+              <p className="text-xs text-gray-500">
+                Cole este link no campo "URL da Política de Privacidade" no formulário da Play Store.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <a
+              href="/privacy.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 text-xs font-semibold text-gray-700 flex items-center gap-1.5 transition-colors"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Ver Página</span>
+            </a>
+
+            <button
+              onClick={handleCopyPrivacyUrl}
+              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs ${
+                copiedPolicy
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+              }`}
+            >
+              {copiedPolicy ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Copiado!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copiar URL</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 font-mono text-xs text-slate-800 break-all select-all flex items-center justify-between gap-2">
+          <span>{privacyUrl}</span>
         </div>
       </div>
 
