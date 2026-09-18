@@ -21,9 +21,10 @@ import { TrendingUp, TrendingDown, DollarSign, Wallet, Calendar, CheckCircle2, C
 interface DashboardViewProps {
   currentUser: User;
   onNavigate: (page: any) => void;
+  onOpenOnboarding?: () => void;
 }
 
-export const DashboardView: React.FC<DashboardViewProps> = ({ currentUser, onNavigate }) => {
+export const DashboardView: React.FC<DashboardViewProps> = ({ currentUser, onNavigate, onOpenOnboarding }) => {
   const [competencia, setCompetencia] = useState<string>(competenciaAtual());
   const [tick, setTick] = useState(0);
 
@@ -152,22 +153,68 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ currentUser, onNav
           </div>
         </div>
 
-        <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-gray-300 shadow-2xs">
-          <Calendar className="w-4 h-4 text-gray-500" />
-          <span className="text-xs font-medium text-gray-600">Mês:</span>
-          <select
-            value={competencia}
-            onChange={e => setCompetencia(e.target.value)}
-            className="text-sm font-semibold text-[#1E1E1E] bg-transparent focus:outline-none cursor-pointer"
-          >
-            {competencias.map(c => (
-              <option key={c} value={c}>
-                {competenciaLegivel(c)}
-              </option>
-            ))}
-          </select>
+        <div className="flex items-center gap-2">
+          {onOpenOnboarding && (
+            <button
+              onClick={onOpenOnboarding}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-semibold shadow-2xs transition-colors"
+              title="Abrir assistente passo a passo"
+            >
+              <span>🧭</span>
+              <span>Passo a Passo</span>
+            </button>
+          )}
+
+          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-gray-300 shadow-2xs">
+            <Calendar className="w-4 h-4 text-gray-500" />
+            <span className="text-xs font-medium text-gray-600">Mês:</span>
+            <select
+              value={competencia}
+              onChange={e => setCompetencia(e.target.value)}
+              className="text-sm font-semibold text-[#1E1E1E] bg-transparent focus:outline-none cursor-pointer"
+            >
+              {competencias.map(c => (
+                <option key={c} value={c}>
+                  {competenciaLegivel(c)}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
+
+      {/* Banner de Boas-vindas para dados zerados / primeiro uso */}
+      {todosLancamentos.length === 0 && (
+        <div className="bg-linear-to-r from-emerald-600 to-teal-700 text-white rounded-2xl p-5 sm:p-6 shadow-md border border-emerald-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 font-bold text-base">
+              <span>🚀</span>
+              <span>Comece cadastrando suas finanças</span>
+            </div>
+            <p className="text-xs text-emerald-100 max-w-xl leading-relaxed">
+              Seu painel está limpo e zerado. Você pode utilizar nosso assistente didático passo a passo para cadastrar suas contas bancárias, cartões e seu primeiro lançamento de receita ou despesa.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {onOpenOnboarding && (
+              <button
+                onClick={onOpenOnboarding}
+                className="px-4 py-2 rounded-xl bg-white text-emerald-800 hover:bg-emerald-50 text-xs font-bold shadow-xs transition-all flex items-center gap-1.5"
+              >
+                <span>Iniciar Passo a Passo</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            )}
+            <button
+              onClick={() => onNavigate('lancamentos')}
+              className="px-3.5 py-2 rounded-xl bg-emerald-800/60 hover:bg-emerald-800 text-white text-xs font-semibold border border-emerald-400/30 transition-all"
+            >
+              Novo Lançamento
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Metrics Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

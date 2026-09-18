@@ -1,7 +1,8 @@
 import { User, Conta, Categoria, Lancamento, Orcamento, Meta, Regra } from './types';
 import { competenciaAtual } from './utils';
 
-const STORAGE_KEY = 'meu_dinheiro_state_v1';
+const STORAGE_KEY = 'meu_dinheiro_state_v2';
+const ONBOARDING_COMPLETED_KEY = 'meu_dinheiro_onboarding_completed_v2';
 
 export const CATEGORIAS_PADRAO: Array<{ nome: string; tipo: 'receita' | 'despesa'; cor: string }> = [
   { nome: 'Salário', tipo: 'receita', cor: '#2E7D32' },
@@ -19,9 +20,8 @@ export const CATEGORIAS_PADRAO: Array<{ nome: string; tipo: 'receita' | 'despesa
 ];
 
 export const CONTAS_PADRAO: Array<{ nome: string; tipo: 'dinheiro' | 'corrente' | 'poupanca' | 'cartao' | 'investimento'; saldo_inicial: number }> = [
-  { nome: 'Carteira', tipo: 'dinheiro', saldo_inicial: 150.0 },
-  { nome: 'Conta corrente', tipo: 'corrente', saldo_inicial: 3200.0 },
-  { nome: 'Poupança', tipo: 'poupanca', saldo_inicial: 5000.0 },
+  { nome: 'Carteira', tipo: 'dinheiro', saldo_inicial: 0 },
+  { nome: 'Conta Corrente', tipo: 'corrente', saldo_inicial: 0 },
 ];
 
 interface AppState {
@@ -44,10 +44,8 @@ interface AppState {
   };
 }
 
-function getInitialState(): AppState {
-  const currentMonth = competenciaAtual();
-  const today = new Date().toISOString().split('T')[0];
-
+// Retorna estado 100% limpo para novos usuários
+function getCleanInitialState(): AppState {
   const initialUser: User = { id: 1, usuario: 'Principal' };
 
   let catIdCounter = 1;
@@ -65,8 +63,50 @@ function getInitialState(): AppState {
     user_id: 1,
     nome: c.nome,
     tipo: c.tipo,
-    saldo_inicial: c.saldo_inicial,
+    saldo_inicial: 0,
   }));
+
+  return {
+    currentUserId: 1,
+    users: [initialUser],
+    contas: initialContas,
+    categorias: initialCategorias,
+    lancamentos: [], // Totalmente zerado para o usuário
+    orcamentos: [],
+    metas: [],
+    regras: [],
+    nextId: {
+      user: 2,
+      conta: contaIdCounter,
+      categoria: catIdCounter,
+      lancamento: 1,
+      orcamento: 1,
+      meta: 1,
+      regra: 1,
+    },
+  };
+}
+
+// Retorna estado populado com exemplos para teste ou demonstração
+function getSampleState(): AppState {
+  const currentMonth = competenciaAtual();
+  const initialUser: User = { id: 1, usuario: 'Principal' };
+
+  let catIdCounter = 1;
+  const initialCategorias: Categoria[] = CATEGORIAS_PADRAO.map(c => ({
+    id: catIdCounter++,
+    user_id: 1,
+    nome: c.nome,
+    tipo: c.tipo,
+    cor: c.cor,
+  }));
+
+  let contaIdCounter = 1;
+  const initialContas: Conta[] = [
+    { id: contaIdCounter++, user_id: 1, nome: 'Carteira', tipo: 'dinheiro', saldo_inicial: 150.0 },
+    { id: contaIdCounter++, user_id: 1, nome: 'Conta corrente', tipo: 'corrente', saldo_inicial: 3200.0 },
+    { id: contaIdCounter++, user_id: 1, nome: 'Poupança', tipo: 'poupanca', saldo_inicial: 5000.0 },
+  ];
 
   const catSalario = initialCategorias.find(c => c.nome === 'Salário')?.id || 1;
   const catAlim = initialCategorias.find(c => c.nome === 'Alimentação')?.id || 5;
@@ -213,7 +253,7 @@ class StorageManager {
     } catch (e) {
       console.error('Falha ao carregar localStorage:', e);
     }
-    const initial = getInitialState();
+    const initial = getCleanInitialState();
     this.saveState(initial);
     return initial;
   }
@@ -230,9 +270,17 @@ class StorageManager {
     this.saveState(this.state);
   }
 
+  public isOnboardingCompleted(): boolean {
+    return localStorage.getItem(ONBOARDING_COMPLETED_KEY) === 'true';
+  }
+
+  public setOnboardingCompleted(completed: boolean): void {
+    localStorage.setItem(ONBOARDING_COMPLETED_KEY, completed ? 'true' : 'false');
+  }
+
   public exportBackup(): string {
     const backupData = {
-      version: '1.0',
+      version: '2.0',
       appName: 'Meu Dinheiro',
       exportedAt: new Date().toISOString(),
       state: this.state,
@@ -249,7 +297,6 @@ class StorageManager {
         throw new Error('Arquivo de backup inválido ou com formato não reconhecido.');
       }
 
-      // Restore state
       this.state = {
         currentUserId: stateToLoad.currentUserId || stateToLoad.users[0]?.id || 1,
         users: stateToLoad.users,
@@ -284,9 +331,18 @@ class StorageManager {
     }
   }
 
-  public resetToDefault(): void {
-    this.state = getInitialState();
+  public resetToClean(): void {
+    this.state = getCleanInitialState();
     this.persist();
+  }
+
+  public loadSampleData(): void {
+    this.state = getSampleState();
+    this.persist();
+  }
+
+  public resetToDefault(): void {
+    this.resetToClean();
   }
 
   public getCurrentUserId(): number {

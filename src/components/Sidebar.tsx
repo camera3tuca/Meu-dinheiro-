@@ -22,7 +22,8 @@ import {
   Eye,
   EyeOff,
   ShieldCheck,
-  Sparkles
+  Sparkles,
+  Compass
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -31,6 +32,7 @@ interface SidebarProps {
   currentUser: User;
   onUserChange: (user: User) => void;
   onOpenBackup: () => void;
+  onOpenOnboarding?: () => void;
   isOpenMobile?: boolean;
   onCloseMobile?: () => void;
   onOpenMobile?: () => void;
@@ -42,6 +44,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentUser,
   onUserChange,
   onOpenBackup,
+  onOpenOnboarding,
   isOpenMobile = false,
   onCloseMobile,
   onOpenMobile,
@@ -154,6 +157,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="text-[11px] font-semibold tracking-wider text-gray-600 uppercase px-3 py-1">
             Ferramentas
           </div>
+          {onOpenOnboarding && (
+            <button
+              onClick={() => {
+                onOpenOnboarding();
+                handleCloseMobile();
+              }}
+              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-emerald-800 bg-emerald-50 hover:bg-emerald-100 transition-all mb-1 border border-emerald-200/60"
+            >
+              <Compass className="w-4 h-4 text-emerald-600" />
+              <span className="truncate font-semibold">Passo a Passo Didático</span>
+            </button>
+          )}
           <button
             onClick={() => {
               onOpenBackup();

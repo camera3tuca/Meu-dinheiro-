@@ -6,6 +6,7 @@ import { Sidebar } from './components/Sidebar';
 import { BottomNavBar } from './components/BottomNavBar';
 import { BackupModal } from './components/BackupModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { OnboardingWizard } from './components/OnboardingWizard';
 import { DashboardView } from './components/DashboardView';
 import { LancamentosView } from './components/LancamentosView';
 import { ContasView } from './components/ContasView';
@@ -21,6 +22,9 @@ import { PlayStoreKitView } from './components/PlayStoreKitView';
 export const AppContent: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<PageView>('painel');
   const [isBackupOpen, setIsBackupOpen] = useState(false);
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState(() => {
+    return !storage.isOnboardingCompleted();
+  });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [appTick, setAppTick] = useState(0);
 
@@ -44,7 +48,14 @@ export const AppContent: React.FC = () => {
   const renderContent = () => {
     switch (currentPage) {
       case 'painel':
-        return <DashboardView key={`painel-${appTick}`} currentUser={currentUser} onNavigate={setCurrentPage} />;
+        return (
+          <DashboardView
+            key={`painel-${appTick}`}
+            currentUser={currentUser}
+            onNavigate={setCurrentPage}
+            onOpenOnboarding={() => setIsOnboardingOpen(true)}
+          />
+        );
       case 'lancamentos':
         return <LancamentosView key={`lanc-${appTick}`} currentUser={currentUser} />;
       case 'contas':
@@ -66,7 +77,14 @@ export const AppContent: React.FC = () => {
       case 'playstore':
         return <PlayStoreKitView key={`playstore-${appTick}`} />;
       default:
-        return <DashboardView key={`def-${appTick}`} currentUser={currentUser} onNavigate={setCurrentPage} />;
+        return (
+          <DashboardView
+            key={`def-${appTick}`}
+            currentUser={currentUser}
+            onNavigate={setCurrentPage}
+            onOpenOnboarding={() => setIsOnboardingOpen(true)}
+          />
+        );
     }
   };
 
@@ -78,6 +96,7 @@ export const AppContent: React.FC = () => {
         currentUser={currentUser}
         onUserChange={setCurrentUser}
         onOpenBackup={() => setIsBackupOpen(true)}
+        onOpenOnboarding={() => setIsOnboardingOpen(true)}
         isOpenMobile={isMobileMenuOpen}
         onOpenMobile={() => setIsMobileMenuOpen(true)}
         onCloseMobile={() => setIsMobileMenuOpen(false)}
@@ -93,6 +112,15 @@ export const AppContent: React.FC = () => {
         onSelectPage={setCurrentPage}
         onOpenMore={() => setIsMobileMenuOpen(true)}
       />
+
+      {/* Passo a Passo Didático / Onboarding Wizard */}
+      {isOnboardingOpen && (
+        <OnboardingWizard
+          currentUser={currentUser}
+          onComplete={() => setIsOnboardingOpen(false)}
+          onDataChanged={handleDataChanged}
+        />
+      )}
 
       {/* Backup & Safety Modal */}
       <BackupModal

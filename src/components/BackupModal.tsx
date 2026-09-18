@@ -84,12 +84,25 @@ export const BackupModal: React.FC<BackupModalProps> = ({ isOpen, onClose, onDat
     reader.readAsText(file);
   };
 
-  const handleReset = () => {
-    if (confirm('Atenção: Todos os dados atuais serão substituídos pelos dados de exemplo padrão. Deseja continuar?')) {
-      storage.resetToDefault();
+  const handleResetToClean = () => {
+    if (confirm('Atenção: Deseja apagar todos os lançamentos e contas e deixar o aplicativo com os dados 100% zerados?')) {
+      storage.resetToClean();
+      storage.setOnboardingCompleted(false);
       setMensagem({
         tipo: 'sucesso',
-        texto: 'Dados redefinidos com sucesso!',
+        texto: 'Aplicativo zerado com sucesso! Você pode iniciar o passo a passo.',
+      });
+      onDataChanged();
+    }
+  };
+
+  const handleLoadSample = () => {
+    if (confirm('Deseja preencher o aplicativo com dados fictícios de exemplo para demonstração?')) {
+      storage.loadSampleData();
+      storage.setOnboardingCompleted(true);
+      setMensagem({
+        tipo: 'sucesso',
+        texto: 'Dados de demonstração carregados com sucesso!',
       });
       onDataChanged();
     }
@@ -190,17 +203,21 @@ export const BackupModal: React.FC<BackupModalProps> = ({ isOpen, onClose, onDat
           </button>
         </div>
 
-        {/* Action 3: Reset */}
-        <div className="pt-2 flex items-center justify-between text-xs text-gray-500">
-          <span className="flex items-center gap-1 text-[11px]">
-            <RefreshCw className="w-3.5 h-3.5" />
-            Redefinir dados para o modelo inicial
-          </span>
+        {/* Action 3: Reset / Limpar */}
+        <div className="pt-2 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-gray-500">
           <button
-            onClick={handleReset}
-            className="text-red-600 hover:text-red-700 font-medium hover:underline text-xs"
+            onClick={handleResetToClean}
+            className="text-red-600 hover:text-red-700 font-semibold hover:underline text-xs flex items-center gap-1 cursor-pointer"
           >
-            Restaurar padrões
+            <RefreshCw className="w-3.5 h-3.5" />
+            Zerar tudo (dados limpos)
+          </button>
+
+          <button
+            onClick={handleLoadSample}
+            className="text-emerald-700 hover:text-emerald-800 font-semibold hover:underline text-xs flex items-center gap-1 cursor-pointer"
+          >
+            Carregar dados de exemplo (demo)
           </button>
         </div>
       </div>
